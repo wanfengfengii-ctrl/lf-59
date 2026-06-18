@@ -24,7 +24,8 @@ import {
   validateStrokePoints,
   calculateDistance,
   calculateScore,
-  createDefaultLayers
+  createDefaultLayers,
+  getTemperatureAtPoint
 } from '@/utils/pyrography'
 import { POINT_SUPPLEMENT_INTERVAL, MIN_MOVE_DISTANCE } from '@/types'
 
@@ -54,6 +55,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   })
   const playbackStrokes = ref<Stroke[]>([])
   const playbackVisibleCount = ref(0)
+  const playbackPointCounts = ref<number[]>([])
   let playbackTimer: number | null = null
 
   const currentScore = ref<ScoringResult | null>(null)
@@ -158,6 +160,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function switchScheme(schemeId: string) {
+    if (isPlaybackMode.value) return
     const scheme = schemes.value.find((s) => s.id === schemeId)
     if (!scheme) return
     if (isDrawing.value) {
@@ -179,6 +182,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function deleteScheme(schemeId: string) {
+    if (isPlaybackMode.value) return
     const index = schemes.value.findIndex((s) => s.id === schemeId)
     if (index === -1) return
     schemes.value.splice(index, 1)
@@ -219,6 +223,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function addLayer(name: string, type: LayerType): Layer | null {
+    if (isPlaybackMode.value) return null
     if (!currentScheme.value) return null
     if (currentScheme.value.layers.length >= MAX_LAYERS) {
       lastError.value = `最多支持 ${MAX_LAYERS} 个图层`
@@ -244,6 +249,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function deleteLayer(layerId: string) {
+    if (isPlaybackMode.value) return
     if (!currentScheme.value) return
     if (currentScheme.value.layers.length <= 1) {
       lastError.value = '至少需要保留一个图层'
@@ -391,16 +397,37 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     }
 
     const layerId = currentLayer.value?.id || ''
-    const stroke = processStroke(
-      currentPoints.value,
-      settings.value.temperature,
-      settings.value.speed,
-      settings.value.pressure,
-      layerId
-    )
+    const presets = currentScheme.value?.temperaturePresets || []
+    const baseTemp = settings.value.temperature
 
-    if (!stroke) {
-      lastError.value = '无法生成有效烙痕，请检查参数设置'
+    const segments: { points: Point[]; temperature: number }[] = []
+    let currentSegmentPoints: Point[] = []
+    let currentSegTemp: number | null = null
+
+    for (const point of currentPoints.value) {
+      const presetTemp = getTemperatureAtPoint(point.x, point.y, presets)
+      const effectiveTemp = presetTemp !== null ? presetTemp : baseTemp
+
+      if (currentSegTemp === null) {
+        currentSegTemp = effectiveTemp
+        currentSegmentPoints = [point]
+      } else if (effectiveTemp === currentSegTemp) {
+        currentSegmentPoints.push(point)
+      } else {
+        if (currentSegmentPoints.length >= 2) {
+          segments.push({ points: [...currentSegmentPoints], temperature: currentSegTemp })
+        }
+        currentSegmentPoints = [currentSegmentPoints[currentSegmentPoints.length - 1], point]
+        currentSegTemp = effectiveTemp
+      }
+    }
+
+    if (currentSegmentPoints.length >= 2 && currentSegTemp !== null) {
+      segments.push({ points: currentSegmentPoints, temperature: currentSegTemp })
+    }
+
+    if (segments.length === 0) {
+      lastError.value = '路径点数量不足（至少需要 3 个点）'
       currentPoints.value = []
       return null
     }
@@ -409,19 +436,40 @@ export const usePyrographyStore = defineStore('pyrography', () => {
 
     if (currentScheme.value) {
       history.value.push([...currentScheme.value.strokes])
-      currentScheme.value.strokes.push(stroke)
-      const layer = currentScheme.value.layers.find((l) => l.id === layerId)
-      if (layer) {
-        layer.strokes.push(stroke)
+    }
+
+    let primaryStroke: Stroke | null = null
+
+    for (const segment of segments) {
+      if (segment.points.length < 2) continue
+
+      const stroke = processStroke(
+        segment.points,
+        segment.temperature,
+        settings.value.speed,
+        settings.value.pressure,
+        layerId
+      )
+
+      if (stroke && currentScheme.value) {
+        currentScheme.value.strokes.push(stroke)
+        const layer = currentScheme.value.layers.find((l) => l.id === layerId)
+        if (layer) {
+          layer.strokes.push(stroke)
+        }
+        if (!primaryStroke) {
+          primaryStroke = stroke
+        }
       }
     }
 
     currentPoints.value = []
     currentScore.value = null
-    return stroke
+    return primaryStroke
   }
 
   function undo() {
+    if (isPlaybackMode.value) return
     if (history.value.length === 0 || !currentScheme.value) return
     const previousState = history.value.pop()
     if (previousState !== undefined) {
@@ -439,6 +487,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function clearCanvas() {
+    if (isPlaybackMode.value) return
     if (!currentScheme.value) return
     history.value.push([...currentScheme.value.strokes])
     currentScheme.value.strokes = []
@@ -449,6 +498,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function clearLayer(layerId: string) {
+    if (isPlaybackMode.value) return
     if (!currentScheme.value) return
     const layer = currentScheme.value.layers.find((l) => l.id === layerId)
     if (!layer) return
@@ -471,6 +521,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
       (a, b) => a.startTime - b.startTime
     )
     playbackVisibleCount.value = 0
+    playbackPointCounts.value = []
     playbackState.value = {
       isPlaying: true,
       isPaused: false,
@@ -507,16 +558,27 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     const firstTime = playbackStrokes.value[0].startTime
     const currentTime = firstTime + playbackState.value.currentTime
 
-    let count = 0
-    for (const stroke of playbackStrokes.value) {
-      if (stroke.startTime <= currentTime) {
-        count++
-      } else {
-        break
+    const pointCounts: number[] = []
+    let visibleCount = 0
+
+    for (let si = 0; si < playbackStrokes.value.length; si++) {
+      const stroke = playbackStrokes.value[si]
+      if (stroke.startTime > currentTime) break
+
+      let pointIdx = 0
+      for (let pi = 0; pi < stroke.points.length; pi++) {
+        if (stroke.points[pi].timestamp <= currentTime) {
+          pointIdx = pi + 1
+        } else {
+          break
+        }
       }
+      pointCounts.push(pointIdx)
+      visibleCount = si + 1
     }
 
-    playbackVisibleCount.value = count
+    playbackPointCounts.value = pointCounts
+    playbackVisibleCount.value = visibleCount
 
     playbackState.value.progress =
       playbackState.value.totalDuration > 0
@@ -525,6 +587,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
 
     if (playbackState.value.currentTime >= playbackState.value.totalDuration) {
       playbackVisibleCount.value = playbackStrokes.value.length
+      playbackPointCounts.value = playbackStrokes.value.map((s) => s.points.length)
       stopPlayback()
       return
     }
@@ -553,6 +616,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     playbackState.value.progress = 0
     playbackState.value.currentTime = 0
     playbackVisibleCount.value = 0
+    playbackPointCounts.value = []
     playbackStrokes.value = []
     if (playbackTimer !== null) {
       clearTimeout(playbackTimer)
@@ -572,15 +636,27 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     const firstTime = playbackStrokes.value[0]?.startTime ?? 0
     const currentTime = firstTime + playbackState.value.currentTime
 
-    let count = 0
-    for (const stroke of playbackStrokes.value) {
-      if (stroke.startTime <= currentTime) {
-        count++
-      } else {
-        break
+    const pointCounts: number[] = []
+    let visibleCount = 0
+
+    for (let si = 0; si < playbackStrokes.value.length; si++) {
+      const stroke = playbackStrokes.value[si]
+      if (stroke.startTime > currentTime) break
+
+      let pointIdx = 0
+      for (let pi = 0; pi < stroke.points.length; pi++) {
+        if (stroke.points[pi].timestamp <= currentTime) {
+          pointIdx = pi + 1
+        } else {
+          break
+        }
       }
+      pointCounts.push(pointIdx)
+      visibleCount = si + 1
     }
-    playbackVisibleCount.value = count
+
+    playbackVisibleCount.value = visibleCount
+    playbackPointCounts.value = pointCounts
   }
 
   function evaluateScore() {
@@ -718,6 +794,7 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     playbackState,
     playbackStrokes,
     playbackVisibleCount,
+    playbackPointCounts,
     currentScore,
     isPlaybackMode,
     init,

@@ -68,7 +68,7 @@
     <div class="panel-section">
       <h3 class="section-title">图层管理</h3>
       <div class="layer-actions">
-        <button class="btn btn-primary btn-sm" @click="handleAddLayer">+ 新建图层</button>
+        <button class="btn btn-primary btn-sm" :disabled="store.isPlaybackMode" @click="handleAddLayer">+ 新建图层</button>
       </div>
       <div class="layer-list">
         <div
@@ -116,12 +116,13 @@
               <span class="mini-value">{{ Math.round(layer.opacity * 100) }}%</span>
             </div>
             <div class="layer-control-row">
-              <button class="btn btn-sm btn-secondary" @click="handleReorderLayer(layer.id, 'up')">↑ 上移</button>
-              <button class="btn btn-sm btn-secondary" @click="handleReorderLayer(layer.id, 'down')">↓ 下移</button>
-              <button class="btn btn-sm btn-danger" @click="handleClearLayer(layer.id)">清空</button>
+              <button class="btn btn-sm btn-secondary" :disabled="store.isPlaybackMode" @click="handleReorderLayer(layer.id, 'up')">↑ 上移</button>
+              <button class="btn btn-sm btn-secondary" :disabled="store.isPlaybackMode" @click="handleReorderLayer(layer.id, 'down')">↓ 下移</button>
+              <button class="btn btn-sm btn-danger" :disabled="store.isPlaybackMode" @click="handleClearLayer(layer.id)">清空</button>
               <button
                 v-if="store.currentLayers.length > 1"
                 class="btn btn-sm btn-danger"
+                :disabled="store.isPlaybackMode"
                 @click="handleDeleteLayer(layer.id)"
               >删除</button>
             </div>
@@ -211,10 +212,10 @@
     <div class="panel-section">
       <h3 class="section-title">操作</h3>
       <div class="action-buttons">
-        <button class="btn btn-secondary" :disabled="!store.canUndo" @click="handleUndo">
+        <button class="btn btn-secondary" :disabled="!store.canUndo || store.isPlaybackMode" @click="handleUndo">
           ↩ 撤销
         </button>
-        <button class="btn btn-secondary" @click="handleClear">
+        <button class="btn btn-secondary" :disabled="store.isPlaybackMode" @click="handleClear">
           🗑 清空
         </button>
         <button class="btn btn-primary" @click="handleEvaluate">
@@ -226,7 +227,7 @@
     <div class="panel-section">
       <h3 class="section-title">方案管理</h3>
       <div class="scheme-actions">
-        <button class="btn btn-primary btn-sm" @click="handleCreateScheme">+ 新建方案</button>
+        <button class="btn btn-primary btn-sm" :disabled="store.isPlaybackMode" @click="handleCreateScheme">+ 新建方案</button>
       </div>
       <div class="scheme-list">
         <div

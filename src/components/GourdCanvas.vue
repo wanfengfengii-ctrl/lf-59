@@ -24,7 +24,7 @@ import { ref, onMounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import { usePyrographyStore } from '@/stores/pyrography'
 import type { Point, Layer, TemperaturePreset } from '@/types'
 import { LAYER_COLORS } from '@/types'
-import { calculateHeatIntensity, heatToColor, calculateDwellTime } from '@/utils/pyrography'
+import { calculateHeatIntensity, heatToColor, calculateDwellTime, getTemperatureAtPoint } from '@/utils/pyrography'
 
 const store = usePyrographyStore()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -284,14 +284,19 @@ function render() {
     for (const layer of sortedLayers) {
       if (!layer.visible) continue
       const layerStrokes = visibleStrokes.filter((s) => s.layerId === layer.id)
-      for (const stroke of layerStrokes) {
+      for (let si = 0; si < layerStrokes.length; si++) {
+        const stroke = layerStrokes[si]
+        const strokeIdx = visibleStrokes.indexOf(stroke)
+        const maxPoints = store.playbackPointCounts[strokeIdx] ?? stroke.points.length
+        const visiblePoints = stroke.points.slice(0, maxPoints)
+        if (visiblePoints.length < 2) continue
         drawStroke(
           ctx,
-          stroke.points,
+          visiblePoints,
           stroke.temperature,
           stroke.speed,
           stroke.pressure,
-          stroke.overburnedRegions,
+          stroke.overburnedRegions.filter((r) => r < maxPoints),
           false,
           layer.opacity
         )
@@ -318,16 +323,43 @@ function render() {
 
     if (store.isDrawing && store.currentPoints.length > 0) {
       const currentLayerOpacity = store.currentLayer?.opacity ?? 1
-      drawStroke(
-        ctx,
-        store.currentPoints,
-        store.settings.temperature,
-        store.settings.speed,
-        store.settings.pressure,
-        [],
-        true,
-        currentLayerOpacity
-      )
+      const presets = store.temperaturePresets
+      const baseTemp = store.settings.temperature
+
+      const segments: { points: Point[]; temperature: number }[] = []
+      let segPoints: Point[] = []
+      let segTemp: number | null = null
+
+      for (const pt of store.currentPoints) {
+        const pTemp = getTemperatureAtPoint(pt.x, pt.y, presets)
+        const eTemp = pTemp !== null ? pTemp : baseTemp
+        if (segTemp === null) {
+          segTemp = eTemp
+          segPoints = [pt]
+        } else if (eTemp === segTemp) {
+          segPoints.push(pt)
+        } else {
+          if (segPoints.length >= 2) segments.push({ points: [...segPoints], temperature: segTemp })
+          segPoints = [segPoints[segPoints.length - 1], pt]
+          segTemp = eTemp
+        }
+      }
+      if (segPoints.length >= 2 && segTemp !== null) {
+        segments.push({ points: segPoints, temperature: segTemp })
+      }
+
+      for (const seg of segments) {
+        drawStroke(
+          ctx,
+          seg.points,
+          seg.temperature,
+          store.settings.speed,
+          store.settings.pressure,
+          [],
+          true,
+          currentLayerOpacity
+        )
+      }
     }
 
     for (const layer of sortedLayers) {
@@ -358,7 +390,7 @@ watch(
 )
 
 watch(
-  () => [store.playbackVisibleCount, store.playbackState],
+  () => [store.playbackVisibleCount, store.playbackPointCounts, store.playbackState],
   () => {
     if (store.isPlaybackMode) {
       render()
