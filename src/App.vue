@@ -43,9 +43,11 @@ import ControlPanel from '@/components/ControlPanel.vue'
 import StatsPanel from '@/components/StatsPanel.vue'
 import { usePyrographyStore } from '@/stores/pyrography'
 import { useFormulaStore } from '@/stores/formula'
+import { useTrainingStore } from '@/stores/training'
 
 const pyrographyStore = usePyrographyStore()
 const formulaStore = useFormulaStore()
+useTrainingStore()
 
 onMounted(() => {
   pyrographyStore.init()

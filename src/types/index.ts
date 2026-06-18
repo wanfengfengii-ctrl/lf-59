@@ -251,11 +251,98 @@ export const MAX_FORMULAS = 50
 export const MAX_FORMULA_VERSIONS = 20
 export const DEFAULT_DEVIATION_WARNING_THRESHOLD = 0.15
 
+export const MAX_TRIALS_PER_FORMULA = 100
+export const CONSECUTIVE_ANOMALY_THRESHOLD = 3
+export const OVERBURN_ANOMALY_RISK = 50
+export const UNIFORMITY_ANOMALY_THRESHOLD = 40
+
+export interface TrialRecord {
+  id: string
+  formulaId: string
+  schemeId: string
+  layerId: string
+  layerType: LayerType
+  trialNumber: number
+  name: string
+  note?: string
+  temperature: number
+  speed: number
+  pressure: number
+  colorDepth: number
+  overburnedCount: number
+  totalStrokes: number
+  overburnRisk: number
+  uniformity: number
+  parameterStability: number
+  colorTransitionScore: number
+  totalScore: number
+  grade: ScoreGrade
+  strokeCount: number
+  appliedAt: number
+  evaluatedAt: number
+  isAnomaly: boolean
+  anomalyReasons: string[]
+}
+
+export interface CalibrationSuggestion {
+  category: 'temperature' | 'speed' | 'pressure' | 'depth' | 'uniformity' | 'overburn'
+  priority: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  currentValue: number
+  recommendedValue: number
+  delta: number
+  confidentLevel: number
+  basedOnTrials: string[]
+}
+
+export interface AnomalyAlert {
+  id: string
+  formulaId: string
+  alertType: 'consecutive_overburn' | 'consecutive_low_uniformity' | 'consecutive_low_score' | 'parameter_drift'
+  severity: 'warning' | 'danger'
+  title: string
+  description: string
+  consecutiveCount: number
+  trialIds: string[]
+  triggeredAt: number
+  acknowledged: boolean
+}
+
+export interface TrialComparison {
+  trialIds: string[]
+  metrics: {
+    temperature: number[]
+    speed: number[]
+    pressure: number[]
+    colorDepth: number[]
+    overburnRisk: number[]
+    uniformity: number[]
+    totalScore: number[]
+  }
+  trialNames: string[]
+}
+
+export interface TrialTrendPoint {
+  trialNumber: number
+  value: number
+  trialId: string
+}
+
+export interface TrialTrendData {
+  metric: string
+  label: string
+  unit: string
+  points: TrialTrendPoint[]
+}
+
 export interface ExportData {
   version: string
   schemes: Scheme[]
   scores: ScoringResult[]
   formulas: Formula[]
   formulaBindings: FormulaBinding[]
+  trialRecords: TrialRecord[]
+  anomalyAlerts: AnomalyAlert[]
   exportedAt: number
 }

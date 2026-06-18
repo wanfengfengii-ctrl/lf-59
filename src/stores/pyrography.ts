@@ -29,6 +29,7 @@ import {
 } from '@/utils/pyrography'
 import { POINT_SUPPLEMENT_INTERVAL, MIN_MOVE_DISTANCE } from '@/types'
 import { useFormulaStore } from './formula'
+import { useTrainingStore } from './training'
 
 const DEFAULT_SETTINGS: PyrographySettings = {
   temperature: 200,
@@ -670,12 +671,15 @@ export const usePyrographyStore = defineStore('pyrography', () => {
 
   function exportProject(): string {
     const { formulas, bindings } = useFormulaStore()
+    const trainingStore = useTrainingStore()
     const data: ExportData = {
-      version: '3.0.0',
+      version: '4.0.0',
       schemes: JSON.parse(JSON.stringify(schemes.value)),
       scores: currentScore.value ? [currentScore.value] : [],
       formulas: JSON.parse(JSON.stringify(formulas)),
       formulaBindings: JSON.parse(JSON.stringify(bindings)),
+      trialRecords: JSON.parse(JSON.stringify(trainingStore.getAllTrialRecords())),
+      anomalyAlerts: JSON.parse(JSON.stringify(trainingStore.getAllAlerts())),
       exportedAt: Date.now()
     }
     return JSON.stringify(data, null, 2)
@@ -718,15 +722,31 @@ export const usePyrographyStore = defineStore('pyrography', () => {
         formulaStore.bindings.splice(0, formulaStore.bindings.length, ...data.formulaBindings)
       }
 
+      const trainingStore = useTrainingStore()
+      if (data.trialRecords && Array.isArray(data.trialRecords)) {
+        const existingTrialIds = new Set(trainingStore.trials.map((t) => t.id))
+        const importedTrials = data.trialRecords.filter((t) => !existingTrialIds.has(t.id))
+        trainingStore.trials.push(...importedTrials)
+      }
+      if (data.anomalyAlerts && Array.isArray(data.anomalyAlerts)) {
+        const existingAlertIds = new Set(trainingStore.alerts.map((a) => a.id))
+        const importedAlerts = data.anomalyAlerts.filter((a) => !existingAlertIds.has(a.id))
+        trainingStore.alerts.push(...importedAlerts)
+      }
+
       history.value = []
       const formulaCount = data.formulas?.length || 0
       const bindingCount = data.formulaBindings?.length || 0
+      const trialCount = data.trialRecords?.length || 0
       let msg = `成功导入 ${schemes.value.length} 个方案`
       if (formulaCount > 0) {
         msg += `，${formulaCount} 个配方`
       }
       if (bindingCount > 0) {
         msg += `，${bindingCount} 个绑定`
+      }
+      if (trialCount > 0) {
+        msg += `，${trialCount} 条试验记录`
       }
       lastError.value = msg
       return true

@@ -442,6 +442,10 @@
       </div>
     </div>
 
+    <div v-if="activeTab === 'training'" class="tab-content">
+      <TrainingLoop />
+    </div>
+
     <div v-if="activeTab === 'import'" class="tab-content">
       <div class="import-export-section">
         <h4>配方导入导出</h4>
@@ -465,8 +469,9 @@
           <p><strong>💡 提示</strong></p>
           <ul>
             <li>删除配方不会影响已生成的作品数据</li>
-            <li>切换方案时会保留各方案的配方绑定关系</li>
-            <li>导入导出项目时会完整保留配方和版本信息</li>
+            <li>删除试验记录不会影响作品</li>
+            <li>切换方案时会保留各方案的配方绑定关系和试验历史</li>
+            <li>导入导出项目时会完整保留配方、版本、绑定和试验记录</li>
           </ul>
         </div>
 
@@ -484,6 +489,20 @@
             <span class="stat-value">{{ store.favoriteFormulas.length }}</span>
           </div>
         </div>
+        <div class="current-stats">
+          <div class="stat-item">
+            <span class="stat-label">试验记录</span>
+            <span class="stat-value">{{ trainingStore.trials.length }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">异常预警</span>
+            <span class="stat-value">{{ trainingStore.alerts.filter(a => !a.acknowledged).length }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">配方绑定</span>
+            <span class="stat-value">{{ store.bindings.length }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -498,16 +517,20 @@
 import { ref, computed, watch } from 'vue'
 import { useFormulaStore } from '@/stores/formula'
 import { usePyrographyStore } from '@/stores/pyrography'
+import { useTrainingStore } from '@/stores/training'
 import { LAYER_TYPE_LABELS } from '@/types'
 import type { Formula, LayerType } from '@/types'
+import TrainingLoop from './TrainingLoop.vue'
 
 const store = useFormulaStore()
 const pyrographyStore = usePyrographyStore()
+const trainingStore = useTrainingStore()
 
 const tabs = [
   { key: 'list', label: '配方列表' },
   { key: 'edit', label: '编辑' },
   { key: 'compare', label: '对比' },
+  { key: 'training', label: '🔬 训练回路' },
   { key: 'import', label: '导入导出' }
 ]
 
