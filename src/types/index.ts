@@ -169,9 +169,93 @@ export const LAYER_COLORS: Record<LayerType, string> = {
   custom: '#ed8936'
 }
 
+export interface Formula {
+  id: string
+  name: string
+  description: string
+  isFavorite: boolean
+  isEnabled: boolean
+  temperatureRange: {
+    min: number
+    max: number
+    optimal: number
+  }
+  speedRange: {
+    min: number
+    max: number
+    optimal: number
+  }
+  pressureRange: {
+    min: number
+    max: number
+    optimal: number
+  }
+  applicableLayerTypes: LayerType[]
+  targetColorDepth: number
+  overburnThreshold: number
+  createdAt: number
+  updatedAt: number
+  versions: FormulaVersion[]
+  currentVersion: number
+}
+
+export interface FormulaVersion {
+  version: number
+  name: string
+  description: string
+  temperatureRange: Formula['temperatureRange']
+  speedRange: Formula['speedRange']
+  pressureRange: Formula['pressureRange']
+  applicableLayerTypes: LayerType[]
+  targetColorDepth: number
+  overburnThreshold: number
+  createdAt: number
+  note?: string
+}
+
+export interface FormulaBinding {
+  formulaId: string
+  layerId: string
+  schemeId: string
+  boundAt: number
+}
+
+export interface FormulaMatchResult {
+  formula: Formula
+  similarity: number
+  deviation: {
+    temperature: number
+    speed: number
+    pressure: number
+  }
+  isWithinRange: boolean
+  warnings: string[]
+}
+
+export interface FormulaComparison {
+  formulaId: string
+  formulaName: string
+  colorDepthScore: number
+  uniformityScore: number
+  overburnRiskScore: number
+  parameterStabilityScore: number
+  overallScore: number
+  temperatureRange: [number, number]
+  speedRange: [number, number]
+  pressureRange: [number, number]
+  applicableLayers: string[]
+  targetDepth: number
+}
+
+export const MAX_FORMULAS = 50
+export const MAX_FORMULA_VERSIONS = 20
+export const DEFAULT_DEVIATION_WARNING_THRESHOLD = 0.15
+
 export interface ExportData {
   version: string
   schemes: Scheme[]
   scores: ScoringResult[]
+  formulas: Formula[]
+  formulaBindings: FormulaBinding[]
   exportedAt: number
 }

@@ -28,6 +28,7 @@ import {
   getTemperatureAtPoint
 } from '@/utils/pyrography'
 import { POINT_SUPPLEMENT_INTERVAL, MIN_MOVE_DISTANCE } from '@/types'
+import { useFormulaStore } from './formula'
 
 const DEFAULT_SETTINGS: PyrographySettings = {
   temperature: 200,
@@ -668,10 +669,13 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   }
 
   function exportProject(): string {
+    const { formulas, bindings } = useFormulaStore()
     const data: ExportData = {
-      version: '2.0.0',
+      version: '3.0.0',
       schemes: JSON.parse(JSON.stringify(schemes.value)),
       scores: currentScore.value ? [currentScore.value] : [],
+      formulas: JSON.parse(JSON.stringify(formulas)),
+      formulaBindings: JSON.parse(JSON.stringify(bindings)),
       exportedAt: Date.now()
     }
     return JSON.stringify(data, null, 2)
@@ -703,8 +707,28 @@ export const usePyrographyStore = defineStore('pyrography', () => {
         currentScore.value = null
       }
 
+      const formulaStore = useFormulaStore()
+      if (data.formulas && Array.isArray(data.formulas)) {
+        formulaStore.formulas.splice(0, formulaStore.formulas.length, ...data.formulas)
+        if (formulaStore.formulas.length > 0 && !formulaStore.selectedFormulaId) {
+          formulaStore.selectedFormulaId = formulaStore.formulas[0].id
+        }
+      }
+      if (data.formulaBindings && Array.isArray(data.formulaBindings)) {
+        formulaStore.bindings.splice(0, formulaStore.bindings.length, ...data.formulaBindings)
+      }
+
       history.value = []
-      lastError.value = `成功导入 ${schemes.value.length} 个方案`
+      const formulaCount = data.formulas?.length || 0
+      const bindingCount = data.formulaBindings?.length || 0
+      let msg = `成功导入 ${schemes.value.length} 个方案`
+      if (formulaCount > 0) {
+        msg += `，${formulaCount} 个配方`
+      }
+      if (bindingCount > 0) {
+        msg += `，${bindingCount} 个绑定`
+      }
+      lastError.value = msg
       return true
     } catch {
       lastError.value = '导入失败：JSON 格式不正确'

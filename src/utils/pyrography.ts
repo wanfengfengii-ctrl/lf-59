@@ -7,7 +7,13 @@ import type {
   ScoreGrade,
   TrainingSuggestion,
   Layer,
-  PlaybackFrame
+  PlaybackFrame,
+  Formula,
+  FormulaVersion,
+  FormulaMatchResult,
+  FormulaComparison,
+  PyrographySettings,
+  LayerType
 } from '@/types'
 import {
   MIN_POINTS,
@@ -479,4 +485,241 @@ export function getTemperatureAtPoint(
     }
   }
   return null
+}
+
+export function generateFormulaId(): string {
+  return `formula_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function createDefaultFormulas(): Formula[] {
+  const now = Date.now()
+  return [
+    {
+      id: generateFormulaId(),
+      name: '淡色底稿配方',
+      description: '适用于底稿层的淡色勾勒，温度较低，不易过烧',
+      isFavorite: true,
+      isEnabled: true,
+      temperatureRange: { min: 120, max: 180, optimal: 150 },
+      speedRange: { min: 12, max: 20, optimal: 15 },
+      pressureRange: { min: 1.5, max: 3, optimal: 2 },
+      applicableLayerTypes: ['draft'],
+      targetColorDepth: 0.2,
+      overburnThreshold: 320,
+      createdAt: now,
+      updatedAt: now,
+      versions: [],
+      currentVersion: 1
+    },
+    {
+      id: generateFormulaId(),
+      name: '标准主线配方',
+      description: '适用于主线层的中等深度线条，平衡清晰度与过烧风险',
+      isFavorite: true,
+      isEnabled: true,
+      temperatureRange: { min: 220, max: 280, optimal: 250 },
+      speedRange: { min: 8, max: 14, optimal: 10 },
+      pressureRange: { min: 3, max: 5, optimal: 4 },
+      applicableLayerTypes: ['mainline', 'custom'],
+      targetColorDepth: 0.5,
+      overburnThreshold: 350,
+      createdAt: now + 1,
+      updatedAt: now + 1,
+      versions: [],
+      currentVersion: 1
+    },
+    {
+      id: generateFormulaId(),
+      name: '深色阴影配方',
+      description: '适用于阴影层的深色渲染，温度较高，需注意控制速度',
+      isFavorite: false,
+      isEnabled: true,
+      temperatureRange: { min: 320, max: 400, optimal: 350 },
+      speedRange: { min: 3, max: 8, optimal: 5 },
+      pressureRange: { min: 2, max: 4.5, optimal: 3 },
+      applicableLayerTypes: ['shadow'],
+      targetColorDepth: 0.75,
+      overburnThreshold: 420,
+      createdAt: now + 2,
+      updatedAt: now + 2,
+      versions: [],
+      currentVersion: 1
+    }
+  ]
+}
+
+export function matchFormula(
+  settings: PyrographySettings,
+  formulas: Formula[],
+  layerType?: LayerType
+): FormulaMatchResult | null {
+  const enabledFormulas = formulas.filter((f) => f.isEnabled)
+  if (enabledFormulas.length === 0) return null
+
+  let bestMatch: FormulaMatchResult | null = null
+
+  for (const formula of enabledFormulas) {
+    if (layerType && !formula.applicableLayerTypes.includes(layerType)) {
+      continue
+    }
+
+    const tempDeviation = calculateNormalizedDeviation(
+      settings.temperature,
+      formula.temperatureRange.optimal,
+      formula.temperatureRange.min,
+      formula.temperatureRange.max
+    )
+    const speedDeviation = calculateNormalizedDeviation(
+      settings.speed,
+      formula.speedRange.optimal,
+      formula.speedRange.min,
+      formula.speedRange.max
+    )
+    const pressureDeviation = calculateNormalizedDeviation(
+      settings.pressure,
+      formula.pressureRange.optimal,
+      formula.pressureRange.min,
+      formula.pressureRange.max
+    )
+
+    const similarity = 1 - (tempDeviation * 0.4 + speedDeviation * 0.35 + pressureDeviation * 0.25)
+
+    const isWithinRange =
+      settings.temperature >= formula.temperatureRange.min &&
+      settings.temperature <= formula.temperatureRange.max &&
+      settings.speed >= formula.speedRange.min &&
+      settings.speed <= formula.speedRange.max &&
+      settings.pressure >= formula.pressureRange.min &&
+      settings.pressure <= formula.pressureRange.max
+
+    const warnings: string[] = []
+    if (settings.temperature < formula.temperatureRange.min) {
+      warnings.push(`温度低于配方下限 ${formula.temperatureRange.min}°C`)
+    } else if (settings.temperature > formula.temperatureRange.max) {
+      warnings.push(`温度高于配方上限 ${formula.temperatureRange.max}°C`)
+    }
+    if (settings.speed < formula.speedRange.min) {
+      warnings.push(`速度低于配方下限 ${formula.speedRange.min}`)
+    } else if (settings.speed > formula.speedRange.max) {
+      warnings.push(`速度高于配方上限 ${formula.speedRange.max}`)
+    }
+    if (settings.pressure < formula.pressureRange.min) {
+      warnings.push(`压力低于配方下限 ${formula.pressureRange.min}`)
+    } else if (settings.pressure > formula.pressureRange.max) {
+      warnings.push(`压力高于配方上限 ${formula.pressureRange.max}`)
+    }
+
+    const result: FormulaMatchResult = {
+      formula,
+      similarity: Math.max(0, similarity),
+      deviation: {
+        temperature: tempDeviation,
+        speed: speedDeviation,
+        pressure: pressureDeviation
+      },
+      isWithinRange,
+      warnings
+    }
+
+    if (!bestMatch || result.similarity > bestMatch.similarity) {
+      bestMatch = result
+    }
+  }
+
+  return bestMatch
+}
+
+function calculateNormalizedDeviation(
+  value: number,
+  optimal: number,
+  min: number,
+  max: number
+): number {
+  const range = max - min
+  if (range === 0) return value === optimal ? 0 : 1
+  return Math.abs(value - optimal) / range
+}
+
+export function calculateFormulaComparison(formulas: Formula[]): FormulaComparison[] {
+  return formulas.map((formula) => {
+    const tempRange = formula.temperatureRange.max - formula.temperatureRange.min
+    const speedRange = formula.speedRange.max - formula.speedRange.min
+    const pressureRange = formula.pressureRange.max - formula.pressureRange.min
+
+    const overburnRiskScore = Math.max(
+      0,
+      100 - ((formula.temperatureRange.optimal - 200) / 300) * 100
+    )
+    const uniformityScore = Math.max(
+      0,
+      100 - (tempRange / 500) * 30 - (speedRange / 100) * 40 - (pressureRange / 10) * 30
+    )
+    const colorDepthScore = Math.min(
+      100,
+      (formula.targetColorDepth / 1) * 100
+    )
+    const parameterStabilityScore = Math.max(
+      0,
+      100 - (tempRange / 500) * 40 - (speedRange / 100) * 35 - (pressureRange / 10) * 25
+    )
+
+    const overallScore =
+      colorDepthScore * 0.25 +
+      uniformityScore * 0.25 +
+      overburnRiskScore * 0.25 +
+      parameterStabilityScore * 0.25
+
+    return {
+      formulaId: formula.id,
+      formulaName: formula.name,
+      colorDepthScore,
+      uniformityScore,
+      overburnRiskScore,
+      parameterStabilityScore,
+      overallScore,
+      temperatureRange: [formula.temperatureRange.min, formula.temperatureRange.max],
+      speedRange: [formula.speedRange.min, formula.speedRange.max],
+      pressureRange: [formula.pressureRange.min, formula.pressureRange.max],
+      applicableLayers: formula.applicableLayerTypes,
+      targetDepth: formula.targetColorDepth
+    }
+  })
+}
+
+export function createFormulaVersion(formula: Formula, note?: string): FormulaVersion {
+  return {
+    version: formula.versions.length + 1,
+    name: formula.name,
+    description: formula.description,
+    temperatureRange: { ...formula.temperatureRange },
+    speedRange: { ...formula.speedRange },
+    pressureRange: { ...formula.pressureRange },
+    applicableLayerTypes: [...formula.applicableLayerTypes],
+    targetColorDepth: formula.targetColorDepth,
+    overburnThreshold: formula.overburnThreshold,
+    createdAt: Date.now(),
+    note
+  }
+}
+
+export function duplicateFormula(formula: Formula): Formula {
+  const now = Date.now()
+  return {
+    ...formula,
+    id: generateFormulaId(),
+    name: `${formula.name} 副本`,
+    createdAt: now,
+    updatedAt: now,
+    versions: [],
+    currentVersion: 1,
+    isFavorite: false
+  }
+}
+
+export function applyFormulaToSettings(formula: Formula): PyrographySettings {
+  return {
+    temperature: formula.temperatureRange.optimal,
+    speed: formula.speedRange.optimal,
+    pressure: formula.pressureRange.optimal
+  }
 }

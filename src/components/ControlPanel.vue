@@ -66,6 +66,14 @@
     </div>
 
     <div class="panel-section">
+      <h3 class="section-title">
+        🧪 配方推荐
+        <button class="link-btn" @click="showFormulaLab = true">配方实验室 →</button>
+      </h3>
+      <FormulaRecommender @open-lab="showFormulaLab = true" />
+    </div>
+
+    <div class="panel-section">
       <h3 class="section-title">图层管理</h3>
       <div class="layer-actions">
         <button class="btn btn-primary btn-sm" :disabled="store.isPlaybackMode" @click="handleAddLayer">+ 新建图层</button>
@@ -301,10 +309,25 @@
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="showFormulaLab" class="modal-overlay" @click.self="showFormulaLab = false">
+        <div class="modal-content formula-lab-modal">
+          <div class="modal-header">
+            <h3>🧪 烙画工艺配方实验室</h3>
+            <button class="modal-close" @click="showFormulaLab = false">×</button>
+          </div>
+          <div class="modal-body">
+            <FormulaLab />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { usePyrographyStore } from '@/stores/pyrography'
 import type { LayerType, PlaybackSpeed } from '@/types'
 import {
@@ -316,8 +339,11 @@ import {
   MAX_PRESSURE,
   OVERBURN_TEMPERATURE
 } from '@/types'
+import FormulaRecommender from './FormulaRecommender.vue'
+import FormulaLab from './FormulaLab.vue'
 
 const store = usePyrographyStore()
+const showFormulaLab = ref(false)
 
 function handleTemperatureChange(e: Event) {
   const target = e.target as HTMLInputElement
@@ -1127,5 +1153,89 @@ function handleImportFile(e: Event) {
 
 .stat-value.danger {
   color: #ef4444;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  float: right;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+.formula-lab-modal {
+  width: 100%;
+  max-width: 520px;
+  height: 85vh;
+  max-height: 700px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.modal-close:hover {
+  opacity: 1;
+}
+
+.modal-body {
+  flex: 1;
+  overflow: hidden;
+  background: #fafafa;
 }
 </style>

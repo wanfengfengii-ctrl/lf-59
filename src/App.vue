@@ -37,9 +37,20 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import GourdCanvas from '@/components/GourdCanvas.vue'
 import ControlPanel from '@/components/ControlPanel.vue'
 import StatsPanel from '@/components/StatsPanel.vue'
+import { usePyrographyStore } from '@/stores/pyrography'
+import { useFormulaStore } from '@/stores/formula'
+
+const pyrographyStore = usePyrographyStore()
+const formulaStore = useFormulaStore()
+
+onMounted(() => {
+  pyrographyStore.init()
+  formulaStore.init()
+})
 </script>
 
 <style>
