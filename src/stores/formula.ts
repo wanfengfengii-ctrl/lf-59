@@ -15,7 +15,8 @@ import {
   calculateFormulaComparison,
   createFormulaVersion,
   duplicateFormula,
-  applyFormulaToSettings
+  applyFormulaToSettings,
+  validateFormula
 } from '@/utils/pyrography'
 import { MAX_FORMULAS, MAX_FORMULA_VERSIONS, DEFAULT_DEVIATION_WARNING_THRESHOLD } from '@/types'
 
@@ -64,6 +65,20 @@ export const useFormulaStore = defineStore('formula', () => {
       return null
     }
 
+    const checkData = {
+      name: data.name,
+      temperatureRange: data.temperatureRange || { min: 150, max: 300, optimal: 220 },
+      speedRange: data.speedRange || { min: 5, max: 15, optimal: 10 },
+      pressureRange: data.pressureRange || { min: 2, max: 6, optimal: 3 },
+      targetColorDepth: data.targetColorDepth ?? 0.5,
+      overburnThreshold: data.overburnThreshold || 350
+    }
+    const validation = validateFormula(checkData)
+    if (!validation.valid) {
+      lastError.value = validation.errors.join('；')
+      return null
+    }
+
     const now = Date.now()
     const formula: Formula = {
       id: generateFormulaId(),
@@ -71,12 +86,12 @@ export const useFormulaStore = defineStore('formula', () => {
       description: data.description || '',
       isFavorite: false,
       isEnabled: true,
-      temperatureRange: data.temperatureRange || { min: 150, max: 300, optimal: 220 },
-      speedRange: data.speedRange || { min: 5, max: 15, optimal: 10 },
-      pressureRange: data.pressureRange || { min: 2, max: 6, optimal: 3 },
+      temperatureRange: checkData.temperatureRange,
+      speedRange: checkData.speedRange,
+      pressureRange: checkData.pressureRange,
       applicableLayerTypes: data.applicableLayerTypes || ['mainline', 'custom'],
-      targetColorDepth: data.targetColorDepth ?? 0.5,
-      overburnThreshold: data.overburnThreshold || 350,
+      targetColorDepth: checkData.targetColorDepth,
+      overburnThreshold: checkData.overburnThreshold,
       createdAt: now,
       updatedAt: now,
       versions: [],
@@ -93,14 +108,29 @@ export const useFormulaStore = defineStore('formula', () => {
     const formula = formulas.value.find((f) => f.id === formulaId)
     if (!formula) return
 
+    const merged = {
+      name: updates.name ?? formula.name,
+      temperatureRange: updates.temperatureRange ?? formula.temperatureRange,
+      speedRange: updates.speedRange ?? formula.speedRange,
+      pressureRange: updates.pressureRange ?? formula.pressureRange,
+      targetColorDepth: updates.targetColorDepth ?? formula.targetColorDepth,
+      overburnThreshold: updates.overburnThreshold ?? formula.overburnThreshold
+    }
+    const validation = validateFormula(merged)
+    if (!validation.valid) {
+      lastError.value = validation.errors.join('；')
+      return
+    }
+
+    Object.assign(formula, updates)
+    formula.updatedAt = Date.now()
+
     if (saveVersion && formula.versions.length < MAX_FORMULA_VERSIONS) {
       const version = createFormulaVersion(formula, versionNote)
       formula.versions.push(version)
       formula.currentVersion = version.version
     }
 
-    Object.assign(formula, updates)
-    formula.updatedAt = Date.now()
     lastError.value = ''
   }
 

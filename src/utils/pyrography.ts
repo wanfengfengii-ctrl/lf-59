@@ -646,10 +646,16 @@ export function calculateFormulaComparison(formulas: Formula[]): FormulaComparis
     const speedRange = formula.speedRange.max - formula.speedRange.min
     const pressureRange = formula.pressureRange.max - formula.pressureRange.min
 
+    const tempOptimal = formula.temperatureRange.optimal
+    const threshold = formula.overburnThreshold
+
+    const tempOverburnRisk = Math.max(0, Math.min(1, (tempOptimal - 200) / 300))
+    const thresholdPenalty = Math.max(0, Math.min(1, (400 - threshold) / 300))
     const overburnRiskScore = Math.max(
       0,
-      100 - ((formula.temperatureRange.optimal - 200) / 300) * 100
+      100 - (tempOverburnRisk * 60 + thresholdPenalty * 40)
     )
+
     const uniformityScore = Math.max(
       0,
       100 - (tempRange / 500) * 30 - (speedRange / 100) * 40 - (pressureRange / 10) * 30
@@ -721,5 +727,61 @@ export function applyFormulaToSettings(formula: Formula): PyrographySettings {
     temperature: formula.temperatureRange.optimal,
     speed: formula.speedRange.optimal,
     pressure: formula.pressureRange.optimal
+  }
+}
+
+export interface FormulaValidationResult {
+  valid: boolean
+  errors: string[]
+}
+
+export function validateFormula(formula: Partial<Formula> & {
+  name: string
+  temperatureRange: Formula['temperatureRange']
+  speedRange: Formula['speedRange']
+  pressureRange: Formula['pressureRange']
+  targetColorDepth: number
+  overburnThreshold: number
+}): FormulaValidationResult {
+  const errors: string[] = []
+
+  if (!formula.name.trim()) {
+    errors.push('请输入配方名称')
+  }
+
+  const { temperatureRange, speedRange, pressureRange } = formula
+
+  if (temperatureRange.min > temperatureRange.max) {
+    errors.push('温度区间错误：最小值不能大于最大值')
+  }
+  if (temperatureRange.optimal < temperatureRange.min || temperatureRange.optimal > temperatureRange.max) {
+    errors.push('温度最优值必须在区间范围内')
+  }
+
+  if (speedRange.min > speedRange.max) {
+    errors.push('速度区间错误：最小值不能大于最大值')
+  }
+  if (speedRange.optimal < speedRange.min || speedRange.optimal > speedRange.max) {
+    errors.push('速度最优值必须在区间范围内')
+  }
+
+  if (pressureRange.min > pressureRange.max) {
+    errors.push('压力区间错误：最小值不能大于最大值')
+  }
+  if (pressureRange.optimal < pressureRange.min || pressureRange.optimal > pressureRange.max) {
+    errors.push('压力最优值必须在区间范围内')
+  }
+
+  if (formula.targetColorDepth < 0 || formula.targetColorDepth > 1) {
+    errors.push('目标颜色深度必须在 0~1 之间')
+  }
+
+  if (formula.overburnThreshold <= 0) {
+    errors.push('允许过烧阈值必须为正数')
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
   }
 }
