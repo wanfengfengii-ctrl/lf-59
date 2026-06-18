@@ -20,13 +20,30 @@
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { usePyrographyStore } from '@/stores/pyrography'
 import type { Point } from '@/types'
-import { calculateHeatIntensity, checkOverburn, heatToColor, calculateDwellTime } from '@/utils/pyrography'
+import { calculateHeatIntensity, heatToColor, calculateDwellTime } from '@/utils/pyrography'
 
 const store = usePyrographyStore()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasWidth = ref(800)
 const canvasHeight = ref(600)
+let renderTimer: number | null = null
+
+function startRenderTimer() {
+  stopRenderTimer()
+  renderTimer = window.setInterval(() => {
+    if (store.isDrawing) {
+      render()
+    }
+  }, 50)
+}
+
+function stopRenderTimer() {
+  if (renderTimer !== null) {
+    clearInterval(renderTimer)
+    renderTimer = null
+  }
+}
 
 function getCanvasPoint(clientX: number, clientY: number): Point {
   const canvas = canvasRef.value
@@ -45,6 +62,7 @@ function getCanvasPoint(clientX: number, clientY: number): Point {
 function handleMouseDown(e: MouseEvent) {
   const point = getCanvasPoint(e.clientX, e.clientY)
   store.startDrawing(point)
+  startRenderTimer()
 }
 
 function handleMouseMove(e: MouseEvent) {
@@ -56,6 +74,7 @@ function handleMouseMove(e: MouseEvent) {
 
 function handleMouseUp() {
   if (!store.isDrawing) return
+  stopRenderTimer()
   store.endDrawing()
   render()
 }
@@ -66,6 +85,7 @@ function handleTouchStart(e: TouchEvent) {
   const point = getCanvasPoint(touch.clientX, touch.clientY)
   point.pressure = (touch as Touch & { force?: number }).force || store.settings.pressure
   store.startDrawing(point)
+  startRenderTimer()
 }
 
 function handleTouchMove(e: TouchEvent) {
@@ -79,6 +99,7 @@ function handleTouchMove(e: TouchEvent) {
 
 function handleTouchEnd() {
   if (!store.isDrawing) return
+  stopRenderTimer()
   store.endDrawing()
   render()
 }
@@ -135,6 +156,7 @@ function drawStroke(
   temperature: number,
   speed: number,
   pressure: number,
+  overburnedRegions: number[] = [],
   isPreview: boolean = false
 ) {
   if (points.length < 2) return
@@ -147,7 +169,12 @@ function drawStroke(
     const p2 = points[i]
     const dwellTime = calculateDwellTime(p1, p2)
     const intensity = calculateHeatIntensity(temperature, dwellTime, speed, pressure)
-    const isOverburned = checkOverburn(temperature, dwellTime)
+    const distance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2))
+
+    const isOverburnedSegment = overburnedRegions.includes(i)
+    const isOverburnedDwell = overburnedRegions.includes(i - 1) && distance < 5
+    const isOverburned = isOverburnedSegment || isOverburnedDwell
+
     const color = heatToColor(intensity, isOverburned)
 
     ctx.strokeStyle = color
@@ -167,17 +194,24 @@ function drawStroke(
     ctx.stroke()
 
     if (isOverburned && !isPreview) {
-      ctx.strokeStyle = 'rgba(255, 50, 50, 0.4)'
-      ctx.lineWidth = ctx.lineWidth + 6
-      ctx.globalAlpha = 0.3
+      const highlightPoint = isOverburnedDwell ? p1 : p2
+      const radius = ctx.lineWidth + 8
+
       ctx.beginPath()
-      ctx.moveTo(p1.x, p1.y)
-      ctx.lineTo(p2.x, p2.y)
+      ctx.arc(highlightPoint.x, highlightPoint.y, radius, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(255, 50, 50, 0.25)'
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(highlightPoint.x, highlightPoint.y, radius - 4, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(255, 50, 50, 0.6)'
+      ctx.lineWidth = 2
       ctx.stroke()
     }
   }
 
   ctx.globalAlpha = 1
+  ctx.lineWidth = 1
 }
 
 function render() {
@@ -192,7 +226,14 @@ function render() {
   drawGourdBackground(ctx, width, height)
 
   for (const stroke of store.currentStrokes) {
-    drawStroke(ctx, stroke.points, stroke.temperature, stroke.speed, stroke.pressure)
+    drawStroke(
+      ctx,
+      stroke.points,
+      stroke.temperature,
+      stroke.speed,
+      stroke.pressure,
+      stroke.overburnedRegions
+    )
   }
 
   if (store.isDrawing && store.currentPoints.length > 0) {
@@ -202,6 +243,7 @@ function render() {
       store.settings.temperature,
       store.settings.speed,
       store.settings.pressure,
+      [],
       true
     )
   }

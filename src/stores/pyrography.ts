@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Stroke, Scheme, PyrographySettings, Point, Statistics } from '@/types'
-import { processStroke, calculateStatistics, generateSchemeId, validateStrokePoints } from '@/utils/pyrography'
+import {
+  processStroke,
+  calculateStatistics,
+  generateSchemeId,
+  validateStrokePoints,
+  calculateDistance
+} from '@/utils/pyrography'
+import { POINT_SUPPLEMENT_INTERVAL, MIN_MOVE_DISTANCE } from '@/types'
 
 const DEFAULT_SETTINGS: PyrographySettings = {
   temperature: 200,
@@ -17,6 +24,8 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   const currentPoints = ref<Point[]>([])
   const isDrawing = ref(false)
   const lastError = ref<string>('')
+  const lastMousePos = ref<{ x: number; y: number } | null>(null)
+  let supplementTimer: number | null = null
 
   const currentScheme = computed<Scheme | undefined>(() => {
     return schemes.value.find((s) => s.id === currentSchemeId.value)
@@ -34,17 +43,54 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     return history.value.length > 0
   })
 
+  function startSupplementTimer() {
+    stopSupplementTimer()
+    supplementTimer = window.setInterval(() => {
+      if (!isDrawing.value || !lastMousePos.value) return
+      const lastPoint = currentPoints.value[currentPoints.value.length - 1]
+      if (!lastPoint) return
+      const distance = calculateDistance(
+        lastPoint,
+        { ...lastPoint, x: lastMousePos.value.x, y: lastMousePos.value.y }
+      )
+      if (distance < MIN_MOVE_DISTANCE) {
+        const newPoint: Point = {
+          x: lastMousePos.value.x,
+          y: lastMousePos.value.y,
+          timestamp: Date.now(),
+          pressure: settings.value.pressure
+        }
+        currentPoints.value.push(newPoint)
+      }
+    }, POINT_SUPPLEMENT_INTERVAL)
+  }
+
+  function stopSupplementTimer() {
+    if (supplementTimer !== null) {
+      clearInterval(supplementTimer)
+      supplementTimer = null
+    }
+  }
+
   function init() {
     if (schemes.value.length === 0) {
       createScheme('默认方案')
     }
   }
 
+  function saveCurrentSettingsToScheme() {
+    if (currentScheme.value) {
+      currentScheme.value.settings = { ...settings.value }
+    }
+  }
+
   function createScheme(name: string): Scheme {
+    saveCurrentSettingsToScheme()
     const scheme: Scheme = {
       id: generateSchemeId(),
       name,
       strokes: [],
+      settings: { ...settings.value },
       createdAt: Date.now()
     }
     schemes.value.push(scheme)
@@ -55,10 +101,15 @@ export const usePyrographyStore = defineStore('pyrography', () => {
 
   function switchScheme(schemeId: string) {
     const scheme = schemes.value.find((s) => s.id === schemeId)
-    if (scheme) {
-      currentSchemeId.value = schemeId
-      history.value = []
+    if (!scheme) return
+    if (isDrawing.value) {
+      endDrawing()
     }
+    saveCurrentSettingsToScheme()
+    currentSchemeId.value = schemeId
+    settings.value = { ...scheme.settings }
+    history.value = []
+    lastError.value = ''
   }
 
   function deleteScheme(schemeId: string) {
@@ -68,10 +119,12 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     if (currentSchemeId.value === schemeId) {
       if (schemes.value.length > 0) {
         currentSchemeId.value = schemes.value[0].id
+        settings.value = { ...schemes.value[0].settings }
       } else {
         createScheme('默认方案')
       }
     }
+    history.value = []
   }
 
   function renameScheme(schemeId: string, name: string) {
@@ -92,21 +145,28 @@ export const usePyrographyStore = defineStore('pyrography', () => {
     }
     lastError.value = ''
     settings.value = { ...settings.value, ...newSettings }
+    saveCurrentSettingsToScheme()
   }
 
   function startDrawing(point: Point) {
+    stopSupplementTimer()
     isDrawing.value = true
     currentPoints.value = [point]
+    lastMousePos.value = { x: point.x, y: point.y }
+    startSupplementTimer()
   }
 
   function addPoint(point: Point) {
     if (!isDrawing.value) return
+    lastMousePos.value = { x: point.x, y: point.y }
     currentPoints.value.push(point)
   }
 
   function endDrawing(): Stroke | null {
+    stopSupplementTimer()
     if (!isDrawing.value) return null
     isDrawing.value = false
+    lastMousePos.value = null
 
     if (!validateStrokePoints(currentPoints.value)) {
       lastError.value = `路径点数量不足（至少需要 3 个点）`

@@ -4,7 +4,8 @@ import {
   OVERBURN_TEMPERATURE,
   OVERBURN_DWELL_TIME,
   MIN_TEMPERATURE,
-  MIN_SPEED
+  MIN_SPEED,
+  MIN_MOVE_DISTANCE
 } from '@/types'
 
 export function calculateDwellTime(p1: Point, p2: Point): number {
@@ -80,16 +81,31 @@ export function processStroke(
   }
 
   const overburnedRegions: number[] = []
+  const dwellPoints: number[] = []
   let maxIntensity = 0
   let totalDwellTime = 0
 
   for (let i = 1; i < points.length; i++) {
-    const dwellTime = calculateDwellTime(points[i - 1], points[i])
+    const p1 = points[i - 1]
+    const p2 = points[i]
+    const dwellTime = calculateDwellTime(p1, p2)
+    const distance = calculateDistance(p1, p2)
     totalDwellTime += dwellTime
+
+    const isDwelling = distance < MIN_MOVE_DISTANCE && dwellTime >= OVERBURN_DWELL_TIME / 2
+    if (isDwelling) {
+      dwellPoints.push(i - 1)
+    }
+
     const intensity = calculateHeatIntensity(temperature, dwellTime, speed, pressure)
     maxIntensity = Math.max(maxIntensity, intensity)
+
     if (checkOverburn(temperature, dwellTime)) {
-      overburnedRegions.push(i)
+      if (distance < MIN_MOVE_DISTANCE) {
+        overburnedRegions.push(i - 1)
+      } else {
+        overburnedRegions.push(i)
+      }
     }
   }
 

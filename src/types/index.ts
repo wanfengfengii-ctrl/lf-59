@@ -20,6 +20,7 @@ export interface Scheme {
   id: string
   name: string
   strokes: Stroke[]
+  settings: PyrographySettings
   createdAt: number
 }
 
@@ -47,3 +48,5 @@ export const MAX_PRESSURE = 10
 export const MIN_POINTS = 3
 export const OVERBURN_TEMPERATURE = 350
 export const OVERBURN_DWELL_TIME = 500
+export const POINT_SUPPLEMENT_INTERVAL = 80
+export const MIN_MOVE_DISTANCE = 2
