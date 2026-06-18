@@ -4,10 +4,10 @@
       <div class="header-content">
         <h1 class="app-title">
           <span class="title-icon">🎨</span>
-          葫芦烙画模拟器
+          分层烙画训练系统
         </h1>
         <p class="app-subtitle">
-          模拟不同温度、停留时间和笔触速度对烙画颜色深浅的影响
+          多图层绘制 · 笔触回放 · 评分与训练建议
         </p>
       </div>
     </header>
@@ -24,6 +24,7 @@
         <div class="canvas-tips">
           <span class="tip">💡 在画布上拖动鼠标绘制烙画路径</span>
           <span class="tip">⏱ 停留时间越长、温度越高，颜色越深</span>
+          <span class="tip">📂 切换图层绘制底稿、主线和阴影</span>
           <span class="tip danger">⚠ 温度 ≥ 350°C 且停留 ≥ 0.5s 会标记为过烧</span>
         </div>
       </section>
@@ -107,7 +108,7 @@ body {
 .app-main {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 1fr 380px;
+  grid-template-columns: 320px 1fr 420px;
   gap: 16px;
   padding: 16px;
   max-width: 1800px;
@@ -157,7 +158,7 @@ body {
 
 @media (max-width: 1400px) {
   .app-main {
-    grid-template-columns: 260px 1fr 340px;
+    grid-template-columns: 280px 1fr 360px;
   }
 }
 

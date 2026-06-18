@@ -66,13 +66,159 @@
     </div>
 
     <div class="panel-section">
+      <h3 class="section-title">图层管理</h3>
+      <div class="layer-actions">
+        <button class="btn btn-primary btn-sm" @click="handleAddLayer">+ 新建图层</button>
+      </div>
+      <div class="layer-list">
+        <div
+          v-for="layer in store.currentLayers"
+          :key="layer.id"
+          :class="['layer-item', { active: layer.id === store.currentLayer?.id }]"
+        >
+          <div class="layer-main" @click="handleSwitchLayer(layer.id)">
+            <button
+              :class="['layer-toggle', { off: !layer.visible }]"
+              @click.stop="handleToggleVisibility(layer.id)"
+              :title="layer.visible ? '隐藏图层' : '显示图层'"
+            >
+              {{ layer.visible ? '👁' : '👁‍🗨' }}
+            </button>
+            <span :class="['layer-type-dot', layer.type]"></span>
+            <input
+              type="text"
+              class="layer-name"
+              :value="layer.name"
+              @click.stop
+              @change="handleRenameLayer(layer.id, $event)"
+            />
+            <span class="layer-count">{{ layer.strokes.length }}</span>
+            <button
+              class="layer-lock"
+              @click.stop="handleToggleLock(layer.id)"
+              :title="layer.locked ? '解锁图层' : '锁定图层'"
+            >
+              {{ layer.locked ? '🔒' : '🔓' }}
+            </button>
+          </div>
+          <div class="layer-controls" v-if="layer.id === store.currentLayer?.id">
+            <div class="layer-control-row">
+              <label>不透明度</label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="layer.opacity"
+                @input="handleLayerOpacity(layer.id, $event)"
+                class="slider mini-slider"
+              />
+              <span class="mini-value">{{ Math.round(layer.opacity * 100) }}%</span>
+            </div>
+            <div class="layer-control-row">
+              <button class="btn btn-sm btn-secondary" @click="handleReorderLayer(layer.id, 'up')">↑ 上移</button>
+              <button class="btn btn-sm btn-secondary" @click="handleReorderLayer(layer.id, 'down')">↓ 下移</button>
+              <button class="btn btn-sm btn-danger" @click="handleClearLayer(layer.id)">清空</button>
+              <button
+                v-if="store.currentLayers.length > 1"
+                class="btn btn-sm btn-danger"
+                @click="handleDeleteLayer(layer.id)"
+              >删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3 class="section-title">区域温度预设</h3>
+      <div class="preset-actions">
+        <button class="btn btn-primary btn-sm" @click="handleAddPreset">+ 新增预设</button>
+      </div>
+      <div class="preset-list">
+        <div
+          v-for="preset in store.temperaturePresets"
+          :key="preset.id"
+          class="preset-item"
+        >
+          <div class="preset-info">
+            <span class="preset-name">{{ preset.name }}</span>
+            <span class="preset-temp">{{ preset.temperature }}°C</span>
+          </div>
+          <div class="preset-region">
+            {{ Math.round(preset.region.x) }},{{ Math.round(preset.region.y) }}
+            {{ Math.round(preset.region.width) }}×{{ Math.round(preset.region.height) }}
+          </div>
+          <button class="preset-delete" @click="handleDeletePreset(preset.id)">×</button>
+        </div>
+        <div v-if="store.temperaturePresets.length === 0" class="preset-empty">
+          暂无温度预设
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3 class="section-title">回放控制</h3>
+      <div class="playback-controls">
+        <button
+          v-if="!store.isPlaybackMode"
+          class="btn btn-primary"
+          :disabled="store.currentStrokes.length === 0"
+          @click="handleStartPlayback"
+        >
+          ▶ 开始回放
+        </button>
+        <template v-else>
+          <div class="playback-buttons">
+            <button
+              class="btn btn-sm"
+              :class="store.playbackState.isPaused ? 'btn-primary' : 'btn-secondary'"
+              @click="handleTogglePause"
+            >
+              {{ store.playbackState.isPaused ? '▶ 继续' : '⏸ 暂停' }}
+            </button>
+            <button class="btn btn-sm btn-secondary" @click="handleStopPlayback">⏹ 停止</button>
+          </div>
+          <div class="playback-progress">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              :value="store.playbackState.progress"
+              @input="handleSeekPlayback"
+              class="slider"
+            />
+            <span class="progress-label">{{ Math.round(store.playbackState.progress * 100) }}%</span>
+          </div>
+          <div class="playback-speed">
+            <label>速度</label>
+            <div class="speed-options">
+              <button
+                v-for="spd in [0.5, 1, 2, 4]"
+                :key="spd"
+                :class="['speed-btn', { active: store.playbackState.speed === spd }]"
+                @click="handleSetSpeed(spd as PlaybackSpeed)"
+              >
+                {{ spd }}x
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <h3 class="section-title">操作</h3>
       <div class="action-buttons">
         <button class="btn btn-secondary" :disabled="!store.canUndo" @click="handleUndo">
           ↩ 撤销
         </button>
         <button class="btn btn-secondary" @click="handleClear">
-          🗑 清空画布
+          🗑 清空
+        </button>
+        <button class="btn btn-primary" @click="handleEvaluate">
+          📊 评分
         </button>
       </div>
     </div>
@@ -80,9 +226,7 @@
     <div class="panel-section">
       <h3 class="section-title">方案管理</h3>
       <div class="scheme-actions">
-        <button class="btn btn-primary" @click="handleCreateScheme">
-          + 新建方案
-        </button>
+        <button class="btn btn-primary btn-sm" @click="handleCreateScheme">+ 新建方案</button>
       </div>
       <div class="scheme-list">
         <div
@@ -98,7 +242,7 @@
             @click.stop
             @change="handleRenameScheme(scheme.id, $event)"
           />
-          <span class="scheme-count">{{ scheme.strokes.length }} 笔</span>
+          <span class="scheme-count">{{ scheme.strokes.length }} 笔 · {{ scheme.layers.length }} 层</span>
           <button
             v-if="store.schemes.length > 1"
             class="scheme-delete"
@@ -111,10 +255,20 @@
     </div>
 
     <div class="panel-section">
-      <h3 class="section-title">导入路径</h3>
-      <div class="import-area">
+      <h3 class="section-title">导入导出</h3>
+      <div class="import-export-area">
         <label class="import-label">
-          <span>📂 选择 JSON 文件</span>
+          <span>📂 导入项目</span>
+          <input
+            type="file"
+            accept=".json"
+            @change="handleImportProject"
+            class="import-input"
+          />
+        </label>
+        <button class="btn btn-secondary" @click="handleExportProject">💾 导出项目</button>
+        <label class="import-label secondary">
+          <span>📝 导入路径</span>
           <input
             type="file"
             accept=".json"
@@ -122,7 +276,6 @@
             class="import-input"
           />
         </label>
-        <p class="import-hint">支持包含 strokes 数组的 JSON 文件</p>
       </div>
     </div>
 
@@ -138,14 +291,12 @@
           <span class="stat-value danger">{{ store.statistics.overburnedCount }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">过烧风险</span>
-          <span :class="['stat-value', store.statistics.overburnedRisk > 30 ? 'danger' : '']">
-            {{ store.statistics.overburnedRisk.toFixed(1) }}%
-          </span>
-        </div>
-        <div class="stat-item">
           <span class="stat-label">均匀度</span>
           <span class="stat-value">{{ store.statistics.uniformity.toFixed(1) }}%</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">参数稳定性</span>
+          <span class="stat-value">{{ store.statistics.parameterStability.toFixed(1) }}%</span>
         </div>
       </div>
     </div>
@@ -154,6 +305,7 @@
 
 <script setup lang="ts">
 import { usePyrographyStore } from '@/stores/pyrography'
+import type { LayerType, PlaybackSpeed } from '@/types'
 import {
   MIN_TEMPERATURE,
   MAX_TEMPERATURE,
@@ -192,6 +344,108 @@ function handleClear() {
   }
 }
 
+function handleAddLayer() {
+  const name = prompt('请输入图层名称：', `图层 ${store.currentLayers.length + 1}`)
+  if (!name || !name.trim()) return
+  const typeInput = prompt('请输入图层类型（draft/mainline/shadow/custom）：', 'custom')
+  const type: LayerType = ['draft', 'mainline', 'shadow', 'custom'].includes(typeInput || '')
+    ? (typeInput as LayerType)
+    : 'custom'
+  store.addLayer(name.trim(), type)
+}
+
+function handleSwitchLayer(layerId: string) {
+  store.switchLayer(layerId)
+}
+
+function handleToggleVisibility(layerId: string) {
+  store.toggleLayerVisibility(layerId)
+}
+
+function handleToggleLock(layerId: string) {
+  store.toggleLayerLock(layerId)
+}
+
+function handleLayerOpacity(layerId: string, e: Event) {
+  const target = e.target as HTMLInputElement
+  store.updateLayerOpacity(layerId, Number(target.value))
+}
+
+function handleReorderLayer(layerId: string, direction: 'up' | 'down') {
+  store.reorderLayer(layerId, direction)
+}
+
+function handleRenameLayer(layerId: string, e: Event) {
+  const target = e.target as HTMLInputElement
+  const name = target.value.trim()
+  if (name) {
+    store.renameLayer(layerId, name)
+  } else {
+    const layer = store.currentLayers.find((l) => l.id === layerId)
+    target.value = layer?.name || ''
+  }
+}
+
+function handleClearLayer(layerId: string) {
+  const layer = store.currentLayers.find((l) => l.id === layerId)
+  if (!layer || layer.strokes.length === 0) return
+  if (confirm(`确定要清空图层"${layer.name}"吗？`)) {
+    store.clearLayer(layerId)
+  }
+}
+
+function handleDeleteLayer(layerId: string) {
+  if (store.currentLayers.length <= 1) return
+  const layer = store.currentLayers.find((l) => l.id === layerId)
+  if (confirm(`确定要删除图层"${layer?.name}"吗？删除后不可恢复。`)) {
+    store.deleteLayer(layerId)
+  }
+}
+
+function handleAddPreset() {
+  const name = prompt('预设名称：', `区域 ${store.temperaturePresets.length + 1}`)
+  if (!name?.trim()) return
+  const x = Number(prompt('区域 X 坐标：', '100')) || 100
+  const y = Number(prompt('区域 Y 坐标：', '100')) || 100
+  const width = Number(prompt('区域宽度：', '200')) || 200
+  const height = Number(prompt('区域高度：', '150')) || 150
+  const temperature = Number(prompt('预设温度 (°C)：', '300')) || 300
+  store.addTemperaturePreset(name.trim(), { x, y, width, height }, temperature)
+}
+
+function handleDeletePreset(presetId: string) {
+  store.deleteTemperaturePreset(presetId)
+}
+
+function handleStartPlayback() {
+  store.startPlayback()
+}
+
+function handleTogglePause() {
+  if (store.playbackState.isPaused) {
+    store.resumePlayback()
+  } else {
+    store.pausePlayback()
+  }
+}
+
+function handleStopPlayback() {
+  store.stopPlayback()
+}
+
+function handleSeekPlayback(e: Event) {
+  const target = e.target as HTMLInputElement
+  store.seekPlayback(Number(target.value))
+}
+
+function handleSetSpeed(speed: PlaybackSpeed) {
+  store.setPlaybackSpeed(speed)
+}
+
+function handleEvaluate() {
+  store.evaluateScore()
+}
+
 function handleCreateScheme() {
   const name = prompt('请输入方案名称：', `方案 ${store.schemes.length + 1}`)
   if (name && name.trim()) {
@@ -220,11 +474,38 @@ function handleRenameScheme(schemeId: string, e: Event) {
   }
 }
 
+function handleImportProject(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (event) => {
+    try {
+      store.importProject(event.target?.result as string)
+    } catch {
+      store.clearError()
+      store.importProject('')
+    }
+  }
+  reader.readAsText(file)
+  target.value = ''
+}
+
+function handleExportProject() {
+  const jsonStr = store.exportProject()
+  const blob = new Blob([jsonStr], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `pyrography_project_${Date.now()}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function handleImportFile(e: Event) {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-
   const reader = new FileReader()
   reader.onload = (event) => {
     try {
@@ -244,8 +525,8 @@ function handleImportFile(e: Event) {
 .control-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px;
+  gap: 16px;
+  padding: 16px;
   background: #fafafa;
   border-radius: 8px;
   height: 100%;
@@ -255,22 +536,22 @@ function handleImportFile(e: Event) {
 .panel-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .section-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #333;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid #e5e5e5;
 }
 
 .param-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .param-header {
@@ -280,19 +561,19 @@ function handleImportFile(e: Event) {
 }
 
 .param-header label {
-  font-size: 13px;
+  font-size: 12px;
   color: #555;
 }
 
 .param-value {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #333;
 }
 
 .slider {
   width: 100%;
-  height: 6px;
+  height: 5px;
   border-radius: 3px;
   outline: none;
   -webkit-appearance: none;
@@ -303,8 +584,8 @@ function handleImportFile(e: Event) {
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid #fff;
@@ -324,8 +605,8 @@ function handleImportFile(e: Event) {
 }
 
 .slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid #fff;
@@ -347,7 +628,7 @@ function handleImportFile(e: Event) {
 .slider-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10px;
   color: #999;
 }
 
@@ -356,17 +637,29 @@ function handleImportFile(e: Event) {
   font-weight: 600;
 }
 
-.action-buttons {
-  display: flex;
-  gap: 10px;
+.mini-slider {
+  flex: 1;
+  height: 4px;
+}
+
+.mini-slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+}
+
+.mini-value {
+  font-size: 11px;
+  color: #666;
+  min-width: 32px;
+  text-align: right;
 }
 
 .btn {
   flex: 1;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 5px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
@@ -375,6 +668,12 @@ function handleImportFile(e: Event) {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 11px;
+  flex: none;
 }
 
 .btn-primary {
@@ -398,24 +697,309 @@ function handleImportFile(e: Event) {
   border-color: #ccc;
 }
 
-.scheme-actions {
-  margin-bottom: 8px;
+.btn-danger {
+  background: #fff;
+  color: #ef4444;
+  border: 1px solid #fecaca;
 }
 
-.scheme-list {
+.btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.layer-actions {
+  margin-bottom: 4px;
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layer-item {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 5px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.layer-item:hover {
+  border-color: #667eea;
+}
+
+.layer-item.active {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.04);
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.12);
+}
+
+.layer-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.layer-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.layer-toggle:hover {
+  opacity: 1;
+}
+
+.layer-toggle.off {
+  opacity: 0.4;
+}
+
+.layer-type-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.layer-type-dot.draft { background: #4299e1; }
+.layer-type-dot.mainline { background: #48bb78; }
+.layer-type-dot.shadow { background: #9f7aea; }
+.layer-type-dot.custom { background: #ed8936; }
+
+.layer-name {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: #333;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  min-width: 0;
+}
+
+.layer-name:focus {
+  background: #fff;
+  box-shadow: 0 0 0 1px #667eea;
+}
+
+.layer-count {
+  font-size: 10px;
+  color: #888;
+  background: #f0f0f0;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.layer-lock {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.layer-lock:hover {
+  opacity: 1;
+}
+
+.layer-controls {
+  padding: 6px 10px 10px;
+  border-top: 1px solid #f0f0f0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.scheme-item {
+.layer-control-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-control-row label {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.layer-control-row .btn-sm {
+  flex: 1;
+  text-align: center;
+}
+
+.preset-actions {
+  margin-bottom: 4px;
+}
+
+.preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preset-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: #fff;
   border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  border-radius: 5px;
+}
+
+.preset-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preset-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+}
+
+.preset-temp {
+  font-size: 11px;
+  color: #ff6b35;
+  font-weight: 600;
+}
+
+.preset-region {
+  font-size: 10px;
+  color: #999;
+  font-family: monospace;
+}
+
+.preset-delete {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: #fee2e2;
+  color: #ef4444;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preset-delete:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.preset-empty {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  padding: 8px;
+}
+
+.playback-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.playback-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.playback-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback-progress .slider {
+  flex: 1;
+}
+
+.progress-label {
+  font-size: 11px;
+  color: #666;
+  min-width: 32px;
+  text-align: right;
+}
+
+.playback-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback-speed label {
+  font-size: 11px;
+  color: #666;
+}
+
+.speed-options {
+  display: flex;
+  gap: 4px;
+}
+
+.speed-btn {
+  padding: 3px 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.speed-btn.active {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.speed-btn:hover:not(.active) {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.scheme-actions {
+  margin-bottom: 4px;
+}
+
+.scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scheme-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -434,7 +1018,7 @@ function handleImportFile(e: Event) {
   flex: 1;
   border: none;
   background: transparent;
-  font-size: 13px;
+  font-size: 12px;
   color: #333;
   outline: none;
   padding: 2px 4px;
@@ -447,22 +1031,23 @@ function handleImportFile(e: Event) {
 }
 
 .scheme-count {
-  font-size: 11px;
+  font-size: 10px;
   color: #888;
   background: #f0f0f0;
-  padding: 2px 8px;
-  border-radius: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
 }
 
 .scheme-delete {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: none;
   background: #fee2e2;
   color: #ef4444;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -474,22 +1059,22 @@ function handleImportFile(e: Event) {
   color: #fff;
 }
 
-.import-area {
+.import-export-area {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .import-label {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 10px;
   background: #fff;
   border: 2px dashed #ccc;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   color: #666;
   transition: all 0.2s;
 }
@@ -500,42 +1085,41 @@ function handleImportFile(e: Event) {
   background: rgba(102, 126, 234, 0.04);
 }
 
+.import-label.secondary {
+  border-style: dotted;
+  padding: 8px;
+  font-size: 11px;
+}
+
 .import-input {
   display: none;
 }
 
-.import-hint {
-  margin: 0;
-  font-size: 11px;
-  color: #999;
-  text-align: center;
-}
-
 .stats-preview {
   background: linear-gradient(135deg, #f6f8fb, #eef2f7);
-  padding: 16px;
-  border-radius: 8px;
+  padding: 12px;
+  border-radius: 6px;
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 10px;
   color: #888;
 }
 
 .stat-value {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: #333;
 }

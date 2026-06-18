@@ -12,14 +12,18 @@
       @touchmove.prevent="handleTouchMove"
       @touchend.prevent="handleTouchEnd"
     />
+    <div v-if="store.isPlaybackMode" class="playback-overlay">
+      <span class="playback-badge">回放模式</span>
+    </div>
     <div v-if="store.lastError" class="error-toast">{{ store.lastError }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import { usePyrographyStore } from '@/stores/pyrography'
-import type { Point } from '@/types'
+import type { Point, Layer, TemperaturePreset } from '@/types'
+import { LAYER_COLORS } from '@/types'
 import { calculateHeatIntensity, heatToColor, calculateDwellTime } from '@/utils/pyrography'
 
 const store = usePyrographyStore()
@@ -150,6 +154,27 @@ function drawGourdBackground(ctx: CanvasRenderingContext2D, width: number, heigh
   ctx.stroke()
 }
 
+function drawTemperaturePresets(
+  ctx: CanvasRenderingContext2D,
+  presets: TemperaturePreset[]
+) {
+  for (const preset of presets) {
+    const { x, y, width, height } = preset.region
+    ctx.strokeStyle = 'rgba(255, 100, 50, 0.6)'
+    ctx.lineWidth = 2
+    ctx.setLineDash([6, 3])
+    ctx.strokeRect(x, y, width, height)
+    ctx.setLineDash([])
+
+    ctx.fillStyle = `rgba(255, ${Math.max(0, 200 - preset.temperature * 0.4)}, 50, 0.08)`
+    ctx.fillRect(x, y, width, height)
+
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif'
+    ctx.fillStyle = 'rgba(200, 80, 30, 0.8)'
+    ctx.fillText(`${preset.name}: ${preset.temperature}°C`, x + 4, y + 16)
+  }
+}
+
 function drawStroke(
   ctx: CanvasRenderingContext2D,
   points: Point[],
@@ -157,7 +182,8 @@ function drawStroke(
   speed: number,
   pressure: number,
   overburnedRegions: number[] = [],
-  isPreview: boolean = false
+  isPreview: boolean = false,
+  layerOpacity: number = 1
 ) {
   if (points.length < 2) return
 
@@ -183,9 +209,9 @@ function drawStroke(
     ctx.lineWidth = baseWidth * (0.5 + avgPressure * 0.1)
 
     if (isPreview) {
-      ctx.globalAlpha = 0.7
+      ctx.globalAlpha = 0.7 * layerOpacity
     } else {
-      ctx.globalAlpha = 1
+      ctx.globalAlpha = layerOpacity
     }
 
     ctx.beginPath()
@@ -197,6 +223,7 @@ function drawStroke(
       const highlightPoint = isOverburnedDwell ? p1 : p2
       const radius = ctx.lineWidth + 8
 
+      ctx.globalAlpha = layerOpacity
       ctx.beginPath()
       ctx.arc(highlightPoint.x, highlightPoint.y, radius, 0, Math.PI * 2)
       ctx.fillStyle = 'rgba(255, 50, 50, 0.25)'
@@ -214,6 +241,29 @@ function drawStroke(
   ctx.lineWidth = 1
 }
 
+function drawLayerIndicator(
+  ctx: CanvasRenderingContext2D,
+  layer: Layer
+) {
+  if (layer.strokes.length === 0) return
+
+  const color = LAYER_COLORS[layer.type] || '#999'
+
+  ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif'
+  ctx.fillStyle = color
+  ctx.globalAlpha = 0.7
+
+  const firstStroke = layer.strokes[0]
+  const lastStroke = layer.strokes[layer.strokes.length - 1]
+  if (firstStroke.points.length > 0 && lastStroke.points.length > 0) {
+    const indicatorX = 8
+    const indicatorY = 20 + layer.order * 18
+    ctx.fillText(`● ${layer.name} (${layer.strokes.length})`, indicatorX, indicatorY)
+  }
+
+  ctx.globalAlpha = 1
+}
+
 function render() {
   const canvas = canvasRef.value
   if (!canvas) return
@@ -225,27 +275,66 @@ function render() {
 
   drawGourdBackground(ctx, width, height)
 
-  for (const stroke of store.currentStrokes) {
-    drawStroke(
-      ctx,
-      stroke.points,
-      stroke.temperature,
-      stroke.speed,
-      stroke.pressure,
-      stroke.overburnedRegions
-    )
-  }
+  drawTemperaturePresets(ctx, store.temperaturePresets)
 
-  if (store.isDrawing && store.currentPoints.length > 0) {
-    drawStroke(
-      ctx,
-      store.currentPoints,
-      store.settings.temperature,
-      store.settings.speed,
-      store.settings.pressure,
-      [],
-      true
-    )
+  if (store.isPlaybackMode) {
+    const visibleStrokes = store.playbackStrokes.slice(0, store.playbackVisibleCount)
+    const sortedLayers = [...store.currentLayers].sort((a, b) => a.order - b.order)
+
+    for (const layer of sortedLayers) {
+      if (!layer.visible) continue
+      const layerStrokes = visibleStrokes.filter((s) => s.layerId === layer.id)
+      for (const stroke of layerStrokes) {
+        drawStroke(
+          ctx,
+          stroke.points,
+          stroke.temperature,
+          stroke.speed,
+          stroke.pressure,
+          stroke.overburnedRegions,
+          false,
+          layer.opacity
+        )
+      }
+    }
+  } else {
+    const sortedLayers = [...store.currentLayers].sort((a, b) => a.order - b.order)
+
+    for (const layer of sortedLayers) {
+      if (!layer.visible) continue
+      for (const stroke of layer.strokes) {
+        drawStroke(
+          ctx,
+          stroke.points,
+          stroke.temperature,
+          stroke.speed,
+          stroke.pressure,
+          stroke.overburnedRegions,
+          false,
+          layer.opacity
+        )
+      }
+    }
+
+    if (store.isDrawing && store.currentPoints.length > 0) {
+      const currentLayerOpacity = store.currentLayer?.opacity ?? 1
+      drawStroke(
+        ctx,
+        store.currentPoints,
+        store.settings.temperature,
+        store.settings.speed,
+        store.settings.pressure,
+        [],
+        true,
+        currentLayerOpacity
+      )
+    }
+
+    for (const layer of sortedLayers) {
+      if (layer.visible && layer.strokes.length > 0) {
+        drawLayerIndicator(ctx, layer)
+      }
+    }
   }
 }
 
@@ -258,7 +347,7 @@ function resizeCanvas() {
 }
 
 watch(
-  () => [store.currentStrokes, store.settings],
+  () => [store.currentStrokes, store.settings, store.currentLayers],
   () => render(),
   { deep: true }
 )
@@ -268,11 +357,31 @@ watch(
   () => render()
 )
 
+watch(
+  () => [store.playbackVisibleCount, store.playbackState],
+  () => {
+    if (store.isPlaybackMode) {
+      render()
+    }
+  },
+  { deep: true }
+)
+
+watch(
+  () => store.temperaturePresets,
+  () => render(),
+  { deep: true }
+)
+
 onMounted(() => {
   store.init()
   resizeCanvas()
   window.addEventListener('resize', resizeCanvas)
   render()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeCanvas)
 })
 </script>
 
@@ -294,6 +403,29 @@ canvas {
   height: 100%;
   cursor: crosshair;
   touch-action: none;
+}
+
+.playback-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  pointer-events: none;
+}
+
+.playback-badge {
+  display: inline-block;
+  background: rgba(102, 126, 234, 0.9);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .error-toast {
