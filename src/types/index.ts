@@ -336,6 +336,87 @@ export interface TrialTrendData {
   points: TrialTrendPoint[]
 }
 
+export interface ReferenceImage {
+  id: string
+  name: string
+  dataUrl: string
+  originalWidth: number
+  originalHeight: number
+  createdAt: number
+}
+
+export interface ReferenceTransform {
+  x: number
+  y: number
+  scaleX: number
+  scaleY: number
+  rotation: number
+  opacity: number
+  visible: boolean
+  locked: boolean
+}
+
+export interface ReferenceBinding {
+  id: string
+  referenceId: string
+  schemeId: string
+  transform: ReferenceTransform
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TracingSegment {
+  id: string
+  strokeId: string
+  layerId: string
+  startPointIndex: number
+  endPointIndex: number
+  deviationScore: number
+  overlapScore: number
+  cornerAccuracy: number
+  rhythmStability: number
+  segmentScore: number
+  deviationPoints: number[]
+  cornerIndices: number[]
+  suggestions: TracingSuggestion[]
+}
+
+export interface TracingSuggestion {
+  type: 'deviation' | 'overlap' | 'corner' | 'rhythm'
+  severity: 'high' | 'medium' | 'low'
+  title: string
+  description: string
+  pointIndex?: number
+}
+
+export interface TracingResult {
+  id: string
+  schemeId: string
+  referenceId: string
+  evaluatedAt: number
+  totalDeviationScore: number
+  totalOverlapScore: number
+  totalCornerAccuracy: number
+  totalRhythmStability: number
+  totalScore: number
+  grade: ScoreGrade
+  segments: TracingSegment[]
+  overallSuggestions: TracingSuggestion[]
+}
+
+export const DEFAULT_REFERENCE_TRANSFORM: ReferenceTransform = {
+  x: 400,
+  y: 300,
+  scaleX: 0.6,
+  scaleY: 0.6,
+  rotation: 0,
+  opacity: 0.5,
+  visible: true,
+  locked: false
+}
+
+export const MAX_REFERENCE_IMAGES = 20
+
 export interface ExportData {
   version: string
   schemes: Scheme[]
@@ -344,5 +425,8 @@ export interface ExportData {
   formulaBindings: FormulaBinding[]
   trialRecords: TrialRecord[]
   anomalyAlerts: AnomalyAlert[]
+  referenceImages: ReferenceImage[]
+  referenceBindings: ReferenceBinding[]
+  tracingResults: TracingResult[]
   exportedAt: number
 }

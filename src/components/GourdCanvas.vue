@@ -1,5 +1,5 @@
 <template>
-  <div class="canvas-container" ref="containerRef">
+  <div class="canvas-container" ref="containerRef" @wheel.prevent="handleWheel">
     <canvas
       ref="canvasRef"
       :width="canvasWidth"
@@ -15,23 +15,45 @@
     <div v-if="store.isPlaybackMode" class="playback-overlay">
       <span class="playback-badge">回放模式</span>
     </div>
-    <div v-if="store.lastError" class="error-toast">{{ store.lastError }}</div>
+    <div v-if="tracingStore.currentBinding && referenceMode !== 'draw'" class="reference-mode-badge">
+      <span>{{ referenceMode === 'move' ? '📐 移动参考图' : referenceMode === 'rotate' ? '🔄 旋转参考图' : '🔍 缩放参考图' }}</span>
+      <button class="close-btn" @click="referenceMode = 'draw'">×</button>
+    </div>
+    <div v-if="store.lastError || tracingStore.lastError" class="error-toast">
+      {{ store.lastError || tracingStore.lastError }}
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, onMounted, watch, nextTick, onBeforeUnmount, computed, reactive } from 'vue'
 import { usePyrographyStore } from '@/stores/pyrography'
-import type { Point, Layer, TemperaturePreset } from '@/types'
+import { useTracingStore } from '@/stores/tracing'
+import type { Point, Layer, TemperaturePreset, ReferenceBinding } from '@/types'
 import { LAYER_COLORS } from '@/types'
 import { calculateHeatIntensity, heatToColor, calculateDwellTime, getTemperatureAtPoint } from '@/utils/pyrography'
 
+const emit = defineEmits<{
+  (e: 'mode-change', mode: 'draw' | 'move' | 'rotate' | 'scale'): void
+}>()
+
 const store = usePyrographyStore()
+const tracingStore = useTracingStore()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasWidth = ref(800)
 const canvasHeight = ref(600)
 let renderTimer: number | null = null
+
+const referenceMode = ref<'draw' | 'move' | 'rotate' | 'scale'>('draw')
+const referenceImages = reactive<Map<string, HTMLImageElement>>(new Map())
+const isDraggingRef = ref(false)
+const dragStartPos = reactive({ x: 0, y: 0 })
+const dragStartTransform = reactive({ x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 })
+
+const visibleBindings = computed<ReferenceBinding[]>(() => {
+  return tracingStore.currentSchemeBindings.filter(b => b.transform.visible)
+})
 
 function startRenderTimer() {
   stopRenderTimer()
@@ -63,13 +85,125 @@ function getCanvasPoint(clientX: number, clientY: number): Point {
   }
 }
 
+function getCanvasPosition(clientX: number, clientY: number): { x: number; y: number } {
+  const canvas = canvasRef.value
+  if (!canvas) return { x: 0, y: 0 }
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = canvas.width / rect.width
+  const scaleY = canvas.height / rect.height
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  }
+}
+
+function isPointInReference(px: number, py: number, binding: ReferenceBinding): boolean {
+  const ref = tracingStore.referenceImages.find(r => r.id === binding.referenceId)
+  if (!ref) return false
+
+  const t = binding.transform
+  const w = ref.originalWidth * t.scaleX
+  const h = ref.originalHeight * t.scaleY
+
+  const cos = Math.cos((-t.rotation * Math.PI) / 180)
+  const sin = Math.sin((-t.rotation * Math.PI) / 180)
+  const dx = px - t.x
+  const dy = py - t.y
+  const localX = dx * cos - dy * sin
+  const localY = dx * sin + dy * cos
+
+  return Math.abs(localX) <= w / 2 + 10 && Math.abs(localY) <= h / 2 + 10
+}
+
 function handleMouseDown(e: MouseEvent) {
+  const pos = getCanvasPosition(e.clientX, e.clientY)
+
+  if (referenceMode.value === 'move' && tracingStore.currentBinding && !tracingStore.currentBinding.transform.locked) {
+    if (isPointInReference(pos.x, pos.y, tracingStore.currentBinding)) {
+      isDraggingRef.value = true
+      dragStartPos.x = pos.x
+      dragStartPos.y = pos.y
+      dragStartTransform.x = tracingStore.currentBinding.transform.x
+      dragStartTransform.y = tracingStore.currentBinding.transform.y
+      return
+    }
+  }
+
+  if (referenceMode.value === 'rotate' && tracingStore.currentBinding && !tracingStore.currentBinding.transform.locked) {
+    isDraggingRef.value = true
+    dragStartPos.x = pos.x
+    dragStartPos.y = pos.y
+    dragStartTransform.rotation = tracingStore.currentBinding.transform.rotation
+    return
+  }
+
+  if (referenceMode.value === 'scale' && tracingStore.currentBinding && !tracingStore.currentBinding.transform.locked) {
+    isDraggingRef.value = true
+    dragStartPos.x = pos.x
+    dragStartPos.y = pos.y
+    dragStartTransform.scaleX = tracingStore.currentBinding.transform.scaleX
+    dragStartTransform.scaleY = tracingStore.currentBinding.transform.scaleY
+    return
+  }
+
+  if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    if (tracingStore.currentBinding && !tracingStore.currentBinding.transform.locked) {
+      if (isPointInReference(pos.x, pos.y, tracingStore.currentBinding)) {
+        isDraggingRef.value = true
+        dragStartPos.x = pos.x
+        dragStartPos.y = pos.y
+        dragStartTransform.x = tracingStore.currentBinding.transform.x
+        dragStartTransform.y = tracingStore.currentBinding.transform.y
+        return
+      }
+    }
+  }
+
   const point = getCanvasPoint(e.clientX, e.clientY)
   store.startDrawing(point)
   startRenderTimer()
 }
 
 function handleMouseMove(e: MouseEvent) {
+  const pos = getCanvasPosition(e.clientX, e.clientY)
+
+  if (isDraggingRef.value && tracingStore.currentBinding) {
+    if (referenceMode.value === 'move' || (e.buttons === 4 || e.shiftKey)) {
+      const deltaX = pos.x - dragStartPos.x
+      const deltaY = pos.y - dragStartPos.y
+      tracingStore.updateBindingTransform(tracingStore.currentBinding.id, {
+        x: dragStartTransform.x + deltaX,
+        y: dragStartTransform.y + deltaY
+      })
+      render()
+      return
+    }
+
+    if (referenceMode.value === 'rotate') {
+      const binding = tracingStore.currentBinding
+      const startAngle = Math.atan2(dragStartPos.y - binding.transform.y, dragStartPos.x - binding.transform.x)
+      const currentAngle = Math.atan2(pos.y - binding.transform.y, pos.x - binding.transform.x)
+      const deltaDeg = ((currentAngle - startAngle) * 180) / Math.PI
+      let newRotation = dragStartTransform.rotation + deltaDeg
+      while (newRotation >= 360) newRotation -= 360
+      while (newRotation < 0) newRotation += 360
+      tracingStore.updateBindingTransform(binding.id, { rotation: newRotation })
+      render()
+      return
+    }
+
+    if (referenceMode.value === 'scale') {
+      const deltaY = pos.y - dragStartPos.y
+      const factor = Math.max(0.5, Math.min(2, 1 - deltaY / 200))
+      tracingStore.updateBindingTransform(tracingStore.currentBinding.id, {
+        scaleX: Math.max(0.1, Math.min(5, dragStartTransform.scaleX * factor)),
+        scaleY: Math.max(0.1, Math.min(5, dragStartTransform.scaleY * factor))
+      })
+      render()
+      return
+    }
+  }
+
   if (!store.isDrawing) return
   const point = getCanvasPoint(e.clientX, e.clientY)
   store.addPoint(point)
@@ -77,6 +211,12 @@ function handleMouseMove(e: MouseEvent) {
 }
 
 function handleMouseUp() {
+  if (isDraggingRef.value) {
+    isDraggingRef.value = false
+    render()
+    return
+  }
+
   if (!store.isDrawing) return
   stopRenderTimer()
   store.endDrawing()
@@ -106,6 +246,103 @@ function handleTouchEnd() {
   stopRenderTimer()
   store.endDrawing()
   render()
+}
+
+function handleWheel(e: WheelEvent) {
+  if (!tracingStore.currentBinding || tracingStore.currentBinding.transform.locked) return
+
+  if (e.ctrlKey || e.metaKey) {
+    const pos = getCanvasPosition(e.clientX, e.clientY)
+    const factor = e.deltaY < 0 ? 1.1 : 0.9
+    tracingStore.scaleReference(factor, pos.x, pos.y)
+  } else if (e.altKey) {
+    const delta = e.deltaY > 0 ? 2 : -2
+    tracingStore.rotateReference(delta)
+  } else if (e.shiftKey) {
+    const deltaX = -e.deltaX * 0.5
+    const deltaY = -e.deltaY * 0.5
+    tracingStore.moveReference(deltaX, deltaY)
+  }
+
+  render()
+}
+
+function ensureReferenceImageLoaded(dataUrl: string, refId: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const cached = referenceImages.get(refId)
+    if (cached && cached.complete) {
+      resolve(cached)
+      return
+    }
+    const img = new Image()
+    img.onload = () => {
+      referenceImages.set(refId, img)
+      resolve(img)
+    }
+    img.onerror = () => reject(new Error('图片加载失败'))
+    img.src = dataUrl
+  })
+}
+
+function drawReferenceImages(ctx: CanvasRenderingContext2D) {
+  for (const binding of visibleBindings.value) {
+    const ref = tracingStore.referenceImages.find(r => r.id === binding.referenceId)
+    if (!ref) continue
+
+    const img = referenceImages.get(ref.id)
+    if (!img) {
+      ensureReferenceImageLoaded(ref.dataUrl, ref.id)
+        .then(() => render())
+        .catch(() => {})
+      continue
+    }
+
+    const t = binding.transform
+    ctx.save()
+    ctx.translate(t.x, t.y)
+    ctx.rotate((t.rotation * Math.PI) / 180)
+    ctx.scale(t.scaleX, t.scaleY)
+    ctx.globalAlpha = t.opacity
+    ctx.drawImage(img, -img.width / 2, -img.height / 2)
+    ctx.restore()
+
+    if (referenceMode.value !== 'draw' && tracingStore.currentBindingId === binding.id) {
+      drawReferenceHandles(ctx, binding, img.width, img.height)
+    }
+  }
+}
+
+function drawReferenceHandles(
+  ctx: CanvasRenderingContext2D,
+  binding: ReferenceBinding,
+  imgWidth: number,
+  imgHeight: number
+) {
+  const t = binding.transform
+  ctx.save()
+  ctx.translate(t.x, t.y)
+  ctx.rotate((t.rotation * Math.PI) / 180)
+  ctx.scale(t.scaleX, t.scaleY)
+
+  ctx.strokeStyle = t.locked ? 'rgba(239, 68, 68, 0.8)' : 'rgba(99, 102, 241, 0.8)'
+  ctx.lineWidth = 2 / Math.max(t.scaleX, t.scaleY)
+  ctx.setLineDash([6 / t.scaleX, 4 / t.scaleY])
+  ctx.strokeRect(-imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight)
+  ctx.setLineDash([])
+
+  const handleSize = 10 / Math.max(t.scaleX, t.scaleY)
+  ctx.fillStyle = t.locked ? '#ef4444' : '#6366f1'
+  const corners = [
+    [-imgWidth / 2, -imgHeight / 2],
+    [imgWidth / 2, -imgHeight / 2],
+    [-imgWidth / 2, imgHeight / 2],
+    [imgWidth / 2, imgHeight / 2]
+  ]
+  for (const [cx, cy] of corners) {
+    ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize)
+  }
+
+  ctx.restore()
 }
 
 function drawGourdBackground(ctx: CanvasRenderingContext2D, width: number, height: number) {
@@ -275,6 +512,8 @@ function render() {
 
   drawGourdBackground(ctx, width, height)
 
+  drawReferenceImages(ctx)
+
   drawTemperaturePresets(ctx, store.temperaturePresets)
 
   if (store.isPlaybackMode) {
@@ -405,16 +644,59 @@ watch(
   { deep: true }
 )
 
+watch(
+  () => [tracingStore.currentSchemeBindings, tracingStore.referenceImages, referenceMode.value],
+  () => render(),
+  { deep: true }
+)
+
+watch(referenceMode, (newMode) => {
+  emit('mode-change', newMode)
+})
+
+defineExpose({
+  setReferenceMode: (mode: 'draw' | 'move' | 'rotate' | 'scale') => {
+    referenceMode.value = mode
+  },
+  getReferenceMode: () => referenceMode.value
+})
+
 onMounted(() => {
   store.init()
   resizeCanvas()
   window.addEventListener('resize', resizeCanvas)
+  window.addEventListener('keydown', handleKeyDown)
   render()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCanvas)
+  window.removeEventListener('keydown', handleKeyDown)
 })
+
+function handleKeyDown(e: KeyboardEvent) {
+  if (!tracingStore.currentBinding) return
+
+  if (e.key === 'v' || e.key === 'V') {
+    tracingStore.toggleReferenceVisible()
+    render()
+  }
+  if (e.key === 'l' || e.key === 'L') {
+    tracingStore.toggleReferenceLocked()
+    render()
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    tracingStore.resetBindingTransform(tracingStore.currentBinding.id)
+    render()
+  }
+
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === '1') { referenceMode.value = 'draw'; render() }
+    if (e.key === '2') { referenceMode.value = 'move'; render() }
+    if (e.key === '3') { referenceMode.value = 'rotate'; render() }
+    if (e.key === '4') { referenceMode.value = 'scale'; render() }
+  }
+}
 </script>
 
 <style scoped>
@@ -455,6 +737,45 @@ canvas {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.reference-mode-badge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(99, 102, 241, 0.95);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  z-index: 5;
+}
+
+.reference-mode-badge .close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.2s;
+}
+
+.reference-mode-badge .close-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
@@ -473,6 +794,8 @@ canvas {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   z-index: 10;
   animation: slideDown 0.3s ease-out;
+  max-width: 80%;
+  text-align: center;
 }
 
 @keyframes slideDown {

@@ -18,8 +18,13 @@ import type {
   TrialComparison,
   TrialTrendData,
   CalibrationSuggestion,
-  AnomalyAlert
+  AnomalyAlert,
+  ReferenceTransform,
+  TracingSegment,
+  TracingResult,
+  TracingSuggestion
 } from '@/types'
+import { DEFAULT_REFERENCE_TRANSFORM } from '@/types'
 import {
   MIN_POINTS,
   OVERBURN_TEMPERATURE,
@@ -1244,4 +1249,553 @@ export function createFormulaBranchFromTrial(
     versions: [],
     currentVersion: 1
   }
+}
+
+export function generateReferenceId(): string {
+  return `ref_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function generateReferenceBindingId(): string {
+  return `binding_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function generateTracingResultId(): string {
+  return `tracing_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function generateTracingSegmentId(): string {
+  return `segment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function createDefaultTransform(): ReferenceTransform {
+  return { ...DEFAULT_REFERENCE_TRANSFORM }
+}
+
+export function transformPoint(
+  point: Point,
+  transform: ReferenceTransform,
+  referenceWidth: number,
+  referenceHeight: number
+): { x: number; y: number } {
+  const refCenterX = referenceWidth / 2
+  const refCenterY = referenceHeight / 2
+
+  let x = point.x - refCenterX
+  let y = point.y - refCenterY
+
+  x *= transform.scaleX
+  y *= transform.scaleY
+
+  const rad = (transform.rotation * Math.PI) / 180
+  const cosR = Math.cos(rad)
+  const sinR = Math.sin(rad)
+  const rotX = x * cosR - y * sinR
+  const rotY = x * sinR + y * cosR
+
+  return {
+    x: rotX + transform.x,
+    y: rotY + transform.y
+  }
+}
+
+export function inverseTransformPoint(
+  canvasX: number,
+  canvasY: number,
+  transform: ReferenceTransform,
+  referenceWidth: number,
+  referenceHeight: number
+): { x: number; y: number } {
+  const refCenterX = referenceWidth / 2
+  const refCenterY = referenceHeight / 2
+
+  let x = canvasX - transform.x
+  let y = canvasY - transform.y
+
+  const rad = (-transform.rotation * Math.PI) / 180
+  const cosR = Math.cos(rad)
+  const sinR = Math.sin(rad)
+  const rotX = x * cosR - y * sinR
+  const rotY = x * sinR + y * cosR
+
+  x = rotX / transform.scaleX
+  y = rotY / transform.scaleY
+
+  return {
+    x: x + refCenterX,
+    y: y + refCenterY
+  }
+}
+
+export function extractEdgePointsFromImage(
+  imageData: ImageData,
+  threshold: number = 128,
+  sampleStep: number = 4
+): Point[] {
+  const points: Point[] = []
+  const { width, height, data } = imageData
+  const now = Date.now()
+
+  for (let y = 0; y < height; y += sampleStep) {
+    for (let x = 0; x < width; x += sampleStep) {
+      const idx = (y * width + x) * 4
+      const r = data[idx]
+      const g = data[idx + 1]
+      const b = data[idx + 2]
+      const a = data[idx + 3]
+
+      if (a < 30) continue
+
+      const gray = (r + g + b) / 3
+
+      if (x >= sampleStep && x < width - sampleStep &&
+          y >= sampleStep && y < height - sampleStep) {
+        const idxLeft = (y * width + (x - sampleStep)) * 4
+        const idxRight = (y * width + (x + sampleStep)) * 4
+        const idxUp = ((y - sampleStep) * width + x) * 4
+        const idxDown = ((y + sampleStep) * width + x) * 4
+
+        const grayLeft = (data[idxLeft] + data[idxLeft + 1] + data[idxLeft + 2]) / 3
+        const grayRight = (data[idxRight] + data[idxRight + 1] + data[idxRight + 2]) / 3
+        const grayUp = (data[idxUp] + data[idxUp + 1] + data[idxUp + 2]) / 3
+        const grayDown = (data[idxDown] + data[idxDown + 1] + data[idxDown + 2]) / 3
+
+        const hDiff = Math.abs(grayLeft - grayRight)
+        const vDiff = Math.abs(grayUp - grayDown)
+
+        if ((hDiff > threshold || vDiff > threshold) && gray < 200) {
+          points.push({
+            x,
+            y,
+            timestamp: now,
+            pressure: 1
+          })
+        }
+      }
+    }
+  }
+
+  return points
+}
+
+function minDistanceToReference(
+  point: Point,
+  referenceEdgePoints: Point[],
+  transform: ReferenceTransform,
+  referenceWidth: number,
+  referenceHeight: number
+): number {
+  let minDist = Infinity
+
+  for (let i = 0; i < referenceEdgePoints.length; i++) {
+    const refPt = referenceEdgePoints[i]
+    const transformed = transformPoint(
+      refPt,
+      transform,
+      referenceWidth,
+      referenceHeight
+    )
+    const dist = Math.sqrt(
+      (point.x - transformed.x) ** 2 +
+      (point.y - transformed.y) ** 2
+    )
+    if (dist < minDist) {
+      minDist = dist
+    }
+  }
+
+  return minDist
+}
+
+function detectCorners(points: Point[], angleThreshold: number = 45): number[] {
+  const corners: number[] = []
+  if (points.length < 5) return corners
+
+  for (let i = 2; i < points.length - 2; i++) {
+    const pPrev = points[i - 2]
+    const pCur = points[i]
+    const pNext = points[i + 2]
+
+    const v1x = pPrev.x - pCur.x
+    const v1y = pPrev.y - pCur.y
+    const v2x = pNext.x - pCur.x
+    const v2y = pNext.y - pCur.y
+
+    const len1 = Math.sqrt(v1x * v1x + v1y * v1y)
+    const len2 = Math.sqrt(v2x * v2x + v2y * v2y)
+
+    if (len1 < 5 || len2 < 5) continue
+
+    const dot = (v1x * v2x + v1y * v2y) / (len1 * len2)
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot))) * (180 / Math.PI)
+
+    if (angle < (180 - angleThreshold)) {
+      corners.push(i)
+    }
+  }
+
+  return corners
+}
+
+function calculateRhythmStability(points: Point[]): number {
+  if (points.length < 4) return 100
+
+  const intervals: number[] = []
+  const distances: number[] = []
+
+  for (let i = 1; i < points.length; i++) {
+    const dt = points[i].timestamp - points[i - 1].timestamp
+    const dd = calculateDistance(points[i - 1], points[i])
+    if (dt > 0) {
+      intervals.push(dt)
+      distances.push(dd)
+    }
+  }
+
+  if (intervals.length < 3) return 100
+
+  const speeds = intervals.map((dt, i) => distances[i] / dt)
+
+  const meanSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length
+  const speedVariance = speeds.reduce(
+    (sum, s) => sum + (s - meanSpeed) ** 2, 0
+  ) / speeds.length
+  const speedStd = Math.sqrt(speedVariance)
+
+  const cv = meanSpeed > 0 ? speedStd / meanSpeed : 1
+  return Math.max(0, 100 - cv * 150)
+}
+
+export function evaluateTracingStroke(
+  stroke: Stroke,
+  referenceEdgePoints: Point[],
+  transform: ReferenceTransform,
+  referenceWidth: number,
+  referenceHeight: number
+): TracingSegment {
+  const { points, layerId, id: strokeId } = stroke
+
+  const deviationPoints: number[] = []
+  let totalDeviation = 0
+
+  for (let i = 0; i < points.length; i++) {
+    const dist = minDistanceToReference(
+      points[i],
+      referenceEdgePoints,
+      transform,
+      referenceWidth,
+      referenceHeight
+    )
+    deviationPoints.push(dist)
+    totalDeviation += dist
+  }
+
+  const avgDeviation = points.length > 0 ? totalDeviation / points.length : 0
+  const deviationScore = Math.max(0, 100 - avgDeviation * 2)
+
+  const overlapThreshold = 15
+  const closePoints = deviationPoints.filter(d => d <= overlapThreshold).length
+  const overlapScore = points.length > 0
+    ? (closePoints / points.length) * 100
+    : 0
+
+  const drawnCorners = detectCorners(points)
+  let matchedCorners = 0
+
+  for (const cornerIdx of drawnCorners) {
+    const cornerPoint = points[cornerIdx]
+    let cornerDist = Infinity
+
+    for (const refPt of referenceEdgePoints) {
+      const transformed = transformPoint(
+        refPt,
+        transform,
+        referenceWidth,
+        referenceHeight
+      )
+      const d = Math.sqrt(
+        (cornerPoint.x - transformed.x) ** 2 +
+        (cornerPoint.y - transformed.y) ** 2
+      )
+      if (d < cornerDist) cornerDist = d
+    }
+
+    if (cornerDist < 25) matchedCorners++
+  }
+
+  const cornerAccuracy = drawnCorners.length > 0
+    ? (matchedCorners / drawnCorners.length) * 100
+    : (referenceEdgePoints.length > 0 ? 70 : 100)
+
+  const rhythmStability = calculateRhythmStability(points)
+
+  const segmentScore =
+    deviationScore * 0.35 +
+    overlapScore * 0.3 +
+    cornerAccuracy * 0.2 +
+    rhythmStability * 0.15
+
+  const suggestions: TracingSuggestion[] = []
+
+  if (deviationScore < 60) {
+    const maxDevIdx = deviationPoints.indexOf(Math.max(...deviationPoints))
+    suggestions.push({
+      type: 'deviation',
+      severity: 'high',
+      title: '临摹偏差较大',
+      description: `平均偏离参考线条 ${avgDeviation.toFixed(1)} 像素，建议放慢速度，仔细对齐参考线。`,
+      pointIndex: maxDevIdx
+    })
+  } else if (deviationScore < 80) {
+    suggestions.push({
+      type: 'deviation',
+      severity: 'medium',
+      title: '存在局部偏离',
+      description: '部分段落偏离参考线条，注意转角处的运笔控制。',
+    })
+  }
+
+  if (overlapScore < 60) {
+    suggestions.push({
+      type: 'overlap',
+      severity: 'high',
+      title: '线条重合度不足',
+      description: `仅 ${overlapScore.toFixed(0)}% 的线条与参考重合，建议提高透明度降低参考图，仔细描摹。`,
+    })
+  } else if (overlapScore < 80) {
+    suggestions.push({
+      type: 'overlap',
+      severity: 'medium',
+      title: '重合度有待提高',
+      description: '部分区域未能准确覆盖参考线条，可适当降低参考图透明度辅助描摹。',
+    })
+  }
+
+  if (cornerAccuracy < 60) {
+    suggestions.push({
+      type: 'corner',
+      severity: 'high',
+      title: '转折准确率偏低',
+      description: `转折处准确率仅 ${cornerAccuracy.toFixed(0)}%，在转角处注意停顿，调整运笔方向。`,
+    })
+  } else if (cornerAccuracy < 80 && drawnCorners.length > 0) {
+    suggestions.push({
+      type: 'corner',
+      severity: 'medium',
+      title: '转折处有优化空间',
+      description: '部分转折不够精准，参考纹样的角点需要重点练习。',
+    })
+  }
+
+  if (rhythmStability < 60) {
+    suggestions.push({
+      type: 'rhythm',
+      severity: 'medium',
+      title: '节奏稳定性不足',
+      description: `运笔节奏稳定性为 ${rhythmStability.toFixed(0)}%，尽量保持匀速运笔，避免忽快忽慢。`,
+    })
+  }
+
+  return {
+    id: generateTracingSegmentId(),
+    strokeId,
+    layerId,
+    startPointIndex: 0,
+    endPointIndex: points.length - 1,
+    deviationScore,
+    overlapScore,
+    cornerAccuracy,
+    rhythmStability,
+    segmentScore,
+    deviationPoints,
+    cornerIndices: drawnCorners,
+    suggestions
+  }
+}
+
+export function evaluateTracingResult(
+  strokes: Stroke[],
+  referenceEdgePoints: Point[],
+  transform: ReferenceTransform,
+  referenceWidth: number,
+  referenceHeight: number,
+  schemeId: string,
+  referenceId: string
+): TracingResult {
+  const segments: TracingSegment[] = []
+
+  for (const stroke of strokes) {
+    if (stroke.points.length < 3) continue
+    const segment = evaluateTracingStroke(
+      stroke,
+      referenceEdgePoints,
+      transform,
+      referenceWidth,
+      referenceHeight
+    )
+    segments.push(segment)
+  }
+
+  if (segments.length === 0) {
+    return {
+      id: generateTracingResultId(),
+      schemeId,
+      referenceId,
+      evaluatedAt: Date.now(),
+      totalDeviationScore: 0,
+      totalOverlapScore: 0,
+      totalCornerAccuracy: 0,
+      totalRhythmStability: 0,
+      totalScore: 0,
+      grade: 'F',
+      segments: [],
+      overallSuggestions: [{
+        type: 'deviation',
+        severity: 'high',
+        title: '暂无有效笔触',
+        description: '请先绘制至少一条完整的笔触后再进行临摹评估。'
+      }]
+    }
+  }
+
+  const totalDeviationScore = segments.reduce((s, seg) => s + seg.deviationScore, 0) / segments.length
+  const totalOverlapScore = segments.reduce((s, seg) => s + seg.overlapScore, 0) / segments.length
+  const totalCornerAccuracy = segments.reduce((s, seg) => s + seg.cornerAccuracy, 0) / segments.length
+  const totalRhythmStability = segments.reduce((s, seg) => s + seg.rhythmStability, 0) / segments.length
+
+  const totalScore =
+    totalDeviationScore * 0.35 +
+    totalOverlapScore * 0.3 +
+    totalCornerAccuracy * 0.2 +
+    totalRhythmStability * 0.15
+
+  const grade: ScoreGrade =
+    totalScore >= 90 ? 'A' :
+    totalScore >= 80 ? 'B' :
+    totalScore >= 70 ? 'C' :
+    totalScore >= 60 ? 'D' : 'F'
+
+  const overallSuggestions: TracingSuggestion[] = []
+  const suggestionCount: Record<string, number> = { deviation: 0, overlap: 0, corner: 0, rhythm: 0 }
+
+  for (const seg of segments) {
+    for (const sug of seg.suggestions) {
+      suggestionCount[sug.type]++
+    }
+  }
+
+  if (totalDeviationScore < 70) {
+    overallSuggestions.push({
+      type: 'deviation',
+      severity: totalDeviationScore < 50 ? 'high' : 'medium',
+      title: '整体偏差需改进',
+      description: `综合偏离度评分 ${totalDeviationScore.toFixed(1)}，建议先降低运笔速度，将参考图透明度调至 0.3~0.5 之间，逐段对齐描摹。`
+    })
+  }
+
+  if (totalOverlapScore < 70) {
+    overallSuggestions.push({
+      type: 'overlap',
+      severity: totalOverlapScore < 50 ? 'high' : 'medium',
+      title: '重合度整体偏低',
+      description: `整体重合度 ${totalOverlapScore.toFixed(1)}%，建议开启参考图锁定功能，避免误移动参考位置。`
+    })
+  }
+
+  if (totalCornerAccuracy < 70) {
+    overallSuggestions.push({
+      type: 'corner',
+      severity: totalCornerAccuracy < 50 ? 'high' : 'medium',
+      title: '转折处需要加强',
+      description: `转折准确率 ${totalCornerAccuracy.toFixed(1)}%，葫芦纹样讲究"方中有圆"，注意拐角处的停顿与蓄力。`
+    })
+  }
+
+  if (totalRhythmStability < 70) {
+    overallSuggestions.push({
+      type: 'rhythm',
+      severity: 'medium',
+      title: '运笔节奏需稳定',
+      description: `节奏稳定性 ${totalRhythmStability.toFixed(1)}%，临摹时保持呼吸平稳，匀速运笔，一气呵成。`
+    })
+  }
+
+  if (overallSuggestions.length === 0) {
+    overallSuggestions.push({
+      type: 'deviation',
+      severity: 'low',
+      title: '临摹质量优秀',
+      description: '各项指标表现良好，继续保持当前的运笔节奏和对齐精度。'
+    })
+  }
+
+  return {
+    id: generateTracingResultId(),
+    schemeId,
+    referenceId,
+    evaluatedAt: Date.now(),
+    totalDeviationScore,
+    totalOverlapScore,
+    totalCornerAccuracy,
+    totalRhythmStability,
+    totalScore,
+    grade,
+    segments,
+    overallSuggestions
+  }
+}
+
+export function loadImageToDataUrl(file: File): Promise<{ dataUrl: string; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string
+      const img = new Image()
+      img.onload = () => {
+        resolve({
+          dataUrl,
+          width: img.width,
+          height: img.height
+        })
+      }
+      img.onerror = () => reject(new Error('图片加载失败'))
+      img.src = dataUrl
+    }
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+export async function extractReferenceEdges(
+  dataUrl: string
+): Promise<{ points: Point[]; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const maxSize = 800
+      let { width, height } = img
+      if (width > maxSize || height > maxSize) {
+        const ratio = Math.min(maxSize / width, maxSize / height)
+        width = Math.round(width * ratio)
+        height = Math.round(height * ratio)
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('无法创建画布上下文'))
+        return
+      }
+
+      ctx.drawImage(img, 0, 0, width, height)
+      const imageData = ctx.getImageData(0, 0, width, height)
+      const points = extractEdgePointsFromImage(imageData, 80, 3)
+
+      resolve({ points, width, height })
+    }
+    img.onerror = () => reject(new Error('参考图加载失败'))
+    img.src = dataUrl
+  })
 }

@@ -7,24 +7,48 @@
           分层烙画训练系统
         </h1>
         <p class="app-subtitle">
-          多图层绘制 · 笔触回放 · 评分与训练建议
+          多图层绘制 · 临摹辅助 · 笔触回放 · 评分与训练建议
         </p>
       </div>
     </header>
 
     <main class="app-main">
       <aside class="sidebar left-sidebar">
-        <ControlPanel />
+        <div class="sidebar-tabs">
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'control' }"
+            @click="activeTab = 'control'"
+          >
+            🎛️ 控制面板
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'tracing' }"
+            @click="activeTab = 'tracing'"
+          >
+            🎨 临摹辅助
+          </button>
+        </div>
+        <div class="tab-content">
+          <div v-show="activeTab === 'control'" class="tab-pane">
+            <ControlPanel />
+          </div>
+          <div v-show="activeTab === 'tracing'" class="tab-pane">
+            <TracingPanel :canvasRef="canvasRef" />
+          </div>
+        </div>
       </aside>
 
       <section class="canvas-section">
         <div class="canvas-wrapper">
-          <GourdCanvas />
+          <GourdCanvas ref="canvasRef" />
         </div>
         <div class="canvas-tips">
           <span class="tip">💡 在画布上拖动鼠标绘制烙画路径</span>
           <span class="tip">⏱ 停留时间越长、温度越高，颜色越深</span>
           <span class="tip">📂 切换图层绘制底稿、主线和阴影</span>
+          <span class="tip">🎨 切换到「临摹辅助」导入参考纹样描摹</span>
           <span class="tip danger">⚠ 温度 ≥ 350°C 且停留 ≥ 0.5s 会标记为过烧</span>
         </div>
       </section>
@@ -37,17 +61,23 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import GourdCanvas from '@/components/GourdCanvas.vue'
 import ControlPanel from '@/components/ControlPanel.vue'
 import StatsPanel from '@/components/StatsPanel.vue'
+import TracingPanel from '@/components/TracingPanel.vue'
 import { usePyrographyStore } from '@/stores/pyrography'
 import { useFormulaStore } from '@/stores/formula'
 import { useTrainingStore } from '@/stores/training'
+import { useTracingStore } from '@/stores/tracing'
 
 const pyrographyStore = usePyrographyStore()
 const formulaStore = useFormulaStore()
 useTrainingStore()
+useTracingStore()
+
+const canvasRef = ref<InstanceType<typeof GourdCanvas> | null>(null)
+const activeTab = ref<'control' | 'tracing'>('control')
 
 onMounted(() => {
   pyrographyStore.init()
@@ -121,7 +151,7 @@ body {
 .app-main {
   flex: 1;
   display: grid;
-  grid-template-columns: 320px 1fr 420px;
+  grid-template-columns: 340px 1fr 420px;
   gap: 16px;
   padding: 16px;
   max-width: 1800px;
@@ -133,6 +163,50 @@ body {
 .sidebar {
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  border-color: transparent;
+}
+
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.tab-pane {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .canvas-section {
@@ -171,7 +245,7 @@ body {
 
 @media (max-width: 1400px) {
   .app-main {
-    grid-template-columns: 280px 1fr 360px;
+    grid-template-columns: 300px 1fr 360px;
   }
 }
 

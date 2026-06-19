@@ -30,6 +30,7 @@ import {
 import { POINT_SUPPLEMENT_INTERVAL, MIN_MOVE_DISTANCE } from '@/types'
 import { useFormulaStore } from './formula'
 import { useTrainingStore } from './training'
+import { useTracingStore } from './tracing'
 
 const DEFAULT_SETTINGS: PyrographySettings = {
   temperature: 200,
@@ -672,14 +673,18 @@ export const usePyrographyStore = defineStore('pyrography', () => {
   function exportProject(): string {
     const { formulas, bindings } = useFormulaStore()
     const trainingStore = useTrainingStore()
+    const tracingStore = useTracingStore()
     const data: ExportData = {
-      version: '4.0.0',
+      version: '5.0.0',
       schemes: JSON.parse(JSON.stringify(schemes.value)),
       scores: currentScore.value ? [currentScore.value] : [],
       formulas: JSON.parse(JSON.stringify(formulas)),
       formulaBindings: JSON.parse(JSON.stringify(bindings)),
       trialRecords: JSON.parse(JSON.stringify(trainingStore.getAllTrialRecords())),
       anomalyAlerts: JSON.parse(JSON.stringify(trainingStore.getAllAlerts())),
+      referenceImages: JSON.parse(JSON.stringify(tracingStore.referenceImages)),
+      referenceBindings: JSON.parse(JSON.stringify(tracingStore.referenceBindings)),
+      tracingResults: JSON.parse(JSON.stringify(tracingStore.tracingResults)),
       exportedAt: Date.now()
     }
     return JSON.stringify(data, null, 2)
@@ -734,10 +739,19 @@ export const usePyrographyStore = defineStore('pyrography', () => {
         trainingStore.alerts.push(...importedAlerts)
       }
 
+      const tracingStore = useTracingStore()
+      tracingStore.setImportedData({
+        referenceImages: data.referenceImages || [],
+        referenceBindings: data.referenceBindings || [],
+        tracingResults: data.tracingResults || []
+      })
+
       history.value = []
       const formulaCount = data.formulas?.length || 0
       const bindingCount = data.formulaBindings?.length || 0
       const trialCount = data.trialRecords?.length || 0
+      const refCount = data.referenceImages?.length || 0
+      const tracingCount = data.tracingResults?.length || 0
       let msg = `成功导入 ${schemes.value.length} 个方案`
       if (formulaCount > 0) {
         msg += `，${formulaCount} 个配方`
@@ -747,6 +761,12 @@ export const usePyrographyStore = defineStore('pyrography', () => {
       }
       if (trialCount > 0) {
         msg += `，${trialCount} 条试验记录`
+      }
+      if (refCount > 0) {
+        msg += `，${refCount} 张参考图`
+      }
+      if (tracingCount > 0) {
+        msg += `，${tracingCount} 份临摹评分`
       }
       lastError.value = msg
       return true
